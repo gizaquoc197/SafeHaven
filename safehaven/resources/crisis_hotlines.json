@@ -1,0 +1,26 @@
+{
+  "US": {
+    "name": "988 Suicide & Crisis Lifeline",
+    "phone": "988",
+    "text": "Text HOME to 741741",
+    "url": "https://988lifeline.org/"
+  },
+  "UK": {
+    "name": "Samaritans",
+    "phone": "116 123",
+    "text": null,
+    "url": "https://www.samaritans.org/"
+  },
+  "CA": {
+    "name": "Talk Suicide Canada",
+    "phone": "1-833-456-4566",
+    "text": "Text 45645",
+    "url": "https://talksuicide.ca/"
+  },
+  "international": {
+    "name": "International Association for Suicide Prevention",
+    "phone": null,
+    "text": null,
+    "url": "https://www.iasp.info/resources/Crisis_Centres/"
+  }
+}
