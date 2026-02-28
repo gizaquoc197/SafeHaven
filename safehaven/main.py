@@ -26,7 +26,7 @@ def main() -> None:
     from safehaven.safety.emotion_detector import KeywordEmotionDetector
     from safehaven.safety.output_filter import SafeOutputFilter
     from safehaven.safety.risk_evaluator import KeywordRiskEvaluator
-    from safehaven.ui.chat_window import ChatWindow
+    from safehaven.ui.app import SafeHavenApp
 
     memory = SQLiteMemory()
     detector = KeywordEmotionDetector()
@@ -42,9 +42,9 @@ def main() -> None:
         output_filter=output_filter,
     )
 
-    window = ChatWindow()
-    window.set_controller(controller)
-    window.mainloop()
+    app = SafeHavenApp()
+    app.set_controller(controller)
+    app.run()
 
 
 if __name__ == "__main__":

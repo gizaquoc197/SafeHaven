@@ -7,7 +7,9 @@
 
 ## 1. Project Overview
 
-**SafeHaven** is a desktop chatbot that provides empathetic conversational support while actively monitoring for signs of emotional distress or crisis. It uses an API-based LLM (Anthropic Claude) for response generation, layered behind a safety pipeline that detects language, analyzes emotion, evaluates risk via a finite state machine, selects response strategies, and filters output.
+**SafeHaven** is a desktop chatbot that provides empathetic conversational support while actively monitoring for signs of emotional distress or crisis. It uses an API-based LLM (Anthropic Claude) for response generation, layered behind a safety pipeline that analyzes emotion, evaluates risk, and filters output.
+
+> **Current vs Target:** The architecture below describes the full target design. The current implementation uses a subset of this pipeline: `UI (Kivy) → EmotionDetector → KeywordRiskEvaluator → ResponseGenerator → OutputFilter → UI`. Components marked *(stub)* below are defined but raise `NotImplementedError`.
 
 ### Scope
 
@@ -110,15 +112,15 @@
 
 ### Layer Responsibilities
 
-| Layer | Purpose | Key Rule |
-|-------|---------|----------|
-| **Presentation** | Renders Kivy UI, captures input | Never calls LLM directly |
-| **Language Detection** | Identifies input language | Runs before emotion detection |
-| **Processing** | Extracts emotion, stores messages | Stateless detection, stateful storage |
-| **Decision** | FSM evaluates risk from UserState | Single source of risk truth; stateful per session |
-| **Strategy Selection** | Picks response strategy by FSM state | Decouples strategy from controller logic |
-| **Generation** | Calls LLM API with strategy-built prompt | Only called if risk ≤ MEDIUM |
-| **Validation** | Filters LLM output + strategy post-processing | Last gate before display |
+| Layer | Purpose | Key Rule | Status |
+|-------|---------|----------|--------|
+| **Presentation** | Renders UI, captures input | Never calls LLM directly | Implemented (Kivy) |
+| **Language Detection** | Identifies input language | Runs before emotion detection | Stub |
+| **Processing** | Extracts emotion, stores messages | Stateless detection, stateful storage | Implemented |
+| **Decision** | Evaluates risk from UserState | Single source of risk truth | Implemented (`KeywordRiskEvaluator`); FSM stubbed |
+| **Strategy Selection** | Picks response strategy by FSM state | Decouples strategy from controller logic | Stub |
+| **Generation** | Calls LLM API with strategy-built prompt | Only called if risk ≤ MEDIUM | Implemented |
+| **Validation** | Filters LLM output + strategy post-processing | Last gate before display | Implemented |
 
 ---
 
@@ -267,6 +269,8 @@ class StrategySelector(Protocol):
 
 ### ChatController — Orchestrator
 
+> **Note:** The code below reflects the current implementation. The target pipeline will add `LanguageDetector` and `StrategySelector` calls (see architecture diagram above).
+
 ```python
 class ChatController:
     """Orchestrates the full message pipeline.
@@ -346,10 +350,10 @@ safehaven/
 ├── ui/
 │   ├── __init__.py
 │   ├── app.py                   # Kivy App + ScreenManager
-│   ├── welcome_screen.py        # Splash screen
+│   ├── welcome_screen.py        # Splash/welcome screen
 │   ├── chat_screen.py           # Main chat interface
 │   ├── crisis_screen.py         # Crisis resource display
-│   ├── insights_screen.py       # Emotional trends dashboard
+│   ├── insights_screen.py       # Emotional trends dashboard (placeholder)
 │   └── theme.py                 # Colors, emotion-to-color map
 ├── memory/
 │   ├── __init__.py
@@ -392,7 +396,7 @@ safehaven/
 │   ├── crisis_keywords_ar.txt   # Arabic crisis keywords
 │   ├── emotion_keywords_ar.json # Arabic emotion word sets
 │   └── safehaven.kv             # Kivy layout file
-└── CLAUDE.md                    # Shared LLM context for team
+CLAUDE.md                            # Shared LLM context for team (repo root)
 ```
 
 ---
@@ -482,14 +486,14 @@ safehaven/
 
 ## 7. Design Patterns Used
 
-| Pattern | Where | Why |
-|---------|-------|-----|
-| **Strategy** | `StrategySelector` picks `ResponseStrategy` by FSM state; strategies: `SupportiveStrategy`, `DeEscalationStrategy`, `CrisisStrategy` | Swap response behavior (system prompt + post-processing) without changing controller logic |
-| **Finite State Machine** | `FSMRiskEvaluator` manages states: CALM → CONCERNED → ELEVATED → CRISIS | Stateful risk tracking across turns; forward-only transitions prevent premature de-escalation |
-| **Pipeline** | `ChatController.handle_message()` — LanguageDetector → EmotionDetector → FSM → Strategy → Generator → Filter | Each stage transforms data for the next; easy to insert/reorder |
-| **Observer** | UI ← Controller (callback on response) | Decouples UI from business logic |
-| **Repository** | `ConversationMemory` | Abstracts storage (SQLite today, anything tomorrow) |
-| **Dependency Injection** | Controller accepts Protocol-typed dependencies | Easy testing with mocks, swappable implementations |
+| Pattern | Where | Status | Why |
+|---------|-------|--------|-----|
+| **Strategy** | `StrategySelector` picks `ResponseStrategy` by FSM state; strategies: `SupportiveStrategy`, `DeEscalationStrategy`, `CrisisStrategy` | Defined, not yet wired | Swap response behavior (system prompt + post-processing) without changing controller logic |
+| **Finite State Machine** | `FSMRiskEvaluator` manages states: CALM → CONCERNED → ELEVATED → CRISIS | Defined, not yet wired (`KeywordRiskEvaluator` active) | Stateful risk tracking across turns; forward-only transitions prevent premature de-escalation |
+| **Pipeline** | `ChatController.handle_message()` — EmotionDetector → RiskEvaluator → Generator → Filter (current) | Implemented (partial pipeline) | Each stage transforms data for the next; easy to insert/reorder |
+| **Observer** | UI ← Controller (callback on response) | Implemented | Decouples UI from business logic |
+| **Repository** | `ConversationMemory` | Implemented | Abstracts storage (SQLite today, anything tomorrow) |
+| **Dependency Injection** | Controller accepts Protocol-typed dependencies | Implemented | Easy testing with mocks, swappable implementations |
 
 ### FSM State Diagram
 

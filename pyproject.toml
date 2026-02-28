@@ -24,5 +24,13 @@ local = [
 strict = true
 packages = ["safehaven"]
 
+[[tool.mypy.overrides]]
+module = ["kivy", "kivy.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["safehaven.ui.*"]
+allow_subclassing_any = true
+
 [tool.pytest.ini_options]
 testpaths = ["safehaven/tests"]

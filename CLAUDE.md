@@ -2,15 +2,19 @@
 
 ## Project
 
-SafeHaven is a safety-aware mental health chatbot (Python, Kivy, Anthropic Claude API). Course project — not for production use. Supports English and Arabic.
+SafeHaven is a safety-aware mental health chatbot (Python, Anthropic Claude API). Course project — not for production use. Supports English and Arabic.
 
 ## Architecture
 
-Pipeline: **UI (Kivy) → LanguageDetector → EmotionDetector → FSM RiskEvaluator → StrategySelector → ResponseGenerator → OutputFilter → UI**
+**Current pipeline:** `UI (Kivy) → EmotionDetector → KeywordRiskEvaluator → ResponseGenerator → OutputFilter → UI`
+
+**Target pipeline (planned):** `UI (Kivy) → LanguageDetector → EmotionDetector → FSM RiskEvaluator → StrategySelector → ResponseGenerator → OutputFilter → UI`
+
+> LanguageDetector, FSMRiskEvaluator, and StrategySelector are stubbed but not yet wired into the controller.
 
 `ChatController.handle_message` returns `None` on HIGH risk — UI must show crisis screen, not a text response.
 
-## FSM States
+## FSM States (planned — not yet active)
 
 `CALM → CONCERNED → ELEVATED → CRISIS`
 
@@ -21,7 +25,9 @@ Pipeline: **UI (Kivy) → LanguageDetector → EmotionDetector → FSM RiskEvalu
 
 Transitions are forward-only within a session (no backwards movement). Reset on `clear()`.
 
-## Strategy Pattern
+> FSM states are defined in `models.py` and `FSMRiskEvaluator` exists but raises `NotImplementedError`. The active evaluator is `KeywordRiskEvaluator` (stateless, keyword-based).
+
+## Strategy Pattern (planned — not yet wired)
 
 Strategy is selected by FSM state via `StrategySelector`:
 
@@ -31,9 +37,11 @@ Strategy is selected by FSM state via `StrategySelector`:
 | ELEVATED | `DeEscalationStrategy` | Grounding, safety-aware prompting |
 | CRISIS | `CrisisStrategy` | Minimal LLM, directs to resources |
 
+> Strategies and `ConcreteStrategySelector` are defined but stubbed (`NotImplementedError`). `ChatController` does not yet call `StrategySelector` — no strategy-driven prompting occurs.
+
 ## Multilingual
 
-- `LanguageDetector` detects input language ('en', 'ar') before emotion detection
+- `LanguageDetector` is stubbed (`NotImplementedError`) — not yet integrated into the pipeline
 - Per-language keyword files: `crisis_keywords.txt` / `crisis_keywords_ar.txt`
 - Per-language emotion words: `emotion_keywords_ar.json`
 
@@ -54,5 +62,5 @@ Strategy is selected by FSM state via `StrategySelector`:
 
 - Never call the LLM directly from UI code — always go through `ChatController`
 - All crisis-related logic goes through `RiskEvaluator`, not ad-hoc keyword checks
-- Strategy selection goes through `StrategySelector`, not hardcoded if/else
-- FSM is stateful — lives for the session, reset on `clear()`
+- Strategy selection will go through `StrategySelector`, not hardcoded if/else (not yet wired)
+- FSM will be stateful — lives for the session, reset on `clear()` (not yet active; `KeywordRiskEvaluator` is used)

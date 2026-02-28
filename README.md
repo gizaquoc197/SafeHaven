@@ -1,6 +1,6 @@
 # SafeHaven
 
-Safety-aware mental health chatbot built with Python, Kivy, and the Anthropic Claude API. Supports English and Arabic with FSM-based risk assessment and strategy-driven response generation.
+Safety-aware mental health chatbot built with Python and the Anthropic Claude API. Uses a Kivy UI with keyword-based risk assessment. FSM-based risk evaluation and strategy-driven response generation are architected but not yet wired in.
 
 > **Disclaimer:** This is a CS 6221 course project — not for production or clinical use.
 
@@ -86,10 +86,10 @@ safehaven/
 │   └── crisis.py            # CrisisStrategy (CRISIS)
 ├── ui/
 │   ├── app.py               # Kivy App + ScreenManager
-│   ├── welcome_screen.py    # Splash screen
+│   ├── welcome_screen.py    # Splash/welcome screen
 │   ├── chat_screen.py       # Main chat interface
 │   ├── crisis_screen.py     # Crisis resources display
-│   ├── insights_screen.py   # Emotional trends dashboard
+│   ├── insights_screen.py   # Emotional trends dashboard (placeholder)
 │   └── theme.py             # Colors, emotion-to-color map
 ├── tests/                   # pytest test suite
 ├── resources/
@@ -105,17 +105,23 @@ safehaven/
 
 ## Pipeline
 
+**Current:**
+```
+UI (Kivy) → EmotionDetector → KeywordRiskEvaluator → ResponseGenerator → OutputFilter → UI
+```
+
+**Target (planned):**
 ```
 UI (Kivy) → LanguageDetector → EmotionDetector → FSM RiskEvaluator → StrategySelector → ResponseGenerator → OutputFilter → UI
 ```
 
 ## Design Patterns
 
-| Pattern | Where | Why |
-|---------|-------|-----|
-| **Strategy** | `StrategySelector` picks `ResponseStrategy` by FSM state | Swap response behavior without changing controller |
-| **FSM** | `FSMRiskEvaluator` tracks escalation states | Stateful risk assessment across conversation turns |
-| **Pipeline** | `ChatController.handle_message()` | Each stage transforms data for the next |
-| **Observer** | UI ← Controller (callback on response) | Decouples UI from business logic |
-| **Repository** | `ConversationMemory` | Abstracts storage (SQLite today, anything tomorrow) |
-| **Dependency Injection** | Controller accepts Protocol-typed dependencies | Easy testing with mocks, swappable implementations |
+| Pattern | Where | Status | Why |
+|---------|-------|--------|-----|
+| **Strategy** | `StrategySelector` picks `ResponseStrategy` by FSM state | Defined, not yet wired | Swap response behavior without changing controller |
+| **FSM** | `FSMRiskEvaluator` tracks escalation states | Defined, not yet wired | Stateful risk assessment across conversation turns |
+| **Pipeline** | `ChatController.handle_message()` | Implemented | Each stage transforms data for the next |
+| **Observer** | UI ← Controller (callback on response) | Implemented | Decouples UI from business logic |
+| **Repository** | `ConversationMemory` | Implemented | Abstracts storage (SQLite today, anything tomorrow) |
+| **Dependency Injection** | Controller accepts Protocol-typed dependencies | Implemented | Easy testing with mocks, swappable implementations |
