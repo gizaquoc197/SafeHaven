@@ -5,6 +5,13 @@ from datetime import datetime
 from enum import Enum
 
 
+class FSMState(Enum):
+    CALM = "calm"
+    CONCERNED = "concerned"
+    ELEVATED = "elevated"
+    CRISIS = "crisis"
+
+
 class EmotionLabel(Enum):
     NEUTRAL = "neutral"
     HAPPY = "happy"
@@ -33,6 +40,7 @@ class Message:
     timestamp: datetime = field(default_factory=datetime.now)
     emotion: EmotionLabel | None = None
     risk_level: RiskLevel = RiskLevel.LOW
+    language: str = "en"
 
 
 @dataclass
@@ -41,6 +49,8 @@ class UserState:
     risk_level: RiskLevel
     message_count: int
     escalation_history: list[RiskLevel] = field(default_factory=list)
+    language: str = "en"
+    fsm_state: str = "calm"
 
 
 @dataclass
@@ -48,6 +58,7 @@ class ConversationContext:
     recent_messages: list[Message]
     user_state: UserState
     system_prompt: str = ""
+    strategy_name: str = ""
 
     def to_llm_messages(self) -> list[dict[str, str]]:
         """Format as user/assistant message dicts for the Claude API.

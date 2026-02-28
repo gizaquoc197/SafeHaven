@@ -1,6 +1,6 @@
 # SafeHaven
 
-Safety-aware mental health chatbot built with Python, Tkinter, and the Anthropic Claude API.
+Safety-aware mental health chatbot built with Python, Kivy, and the Anthropic Claude API. Supports English and Arabic with FSM-based risk assessment and strategy-driven response generation.
 
 > **Disclaimer:** This is a CS 6221 course project — not for production or clinical use.
 
@@ -8,6 +8,7 @@ Safety-aware mental health chatbot built with Python, Tkinter, and the Anthropic
 
 - **Python 3.11+**
 - **Git**
+- **Kivy system dependencies** — see [Kivy installation guide](https://kivy.org/doc/stable/gettingstarted/installation.html) for your platform
 - (Optional) [uv](https://docs.astral.sh/uv/) for faster dependency management
 - (Optional) [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) for MCP server integration
 
@@ -29,6 +30,9 @@ source .venv/bin/activate
 
 # Install in editable mode with dev dependencies
 pip install -e ".[dev]"
+
+# For local model support (Ollama)
+pip install -e ".[local]"
 
 # Configure environment variables
 cp .env.example .env
@@ -64,14 +68,54 @@ claude mcp add --transport http --scope user context7 https://mcp.context7.com/m
 
 ```
 safehaven/
-├── controller/       # ChatController — orchestrates the pipeline
-├── llm/              # Claude API response generation
-├── memory/           # SQLite-backed conversation memory
-├── safety/           # EmotionDetector, RiskEvaluator, OutputFilter
-├── ui/               # Tkinter chat window and crisis modal
-├── tests/            # pytest test suite
-├── interfaces.py     # Protocol definitions
-└── models.py         # Dataclass models
+├── controller/              # ChatController — orchestrates the pipeline
+├── llm/
+│   ├── claude_generator.py  # ResponseGenerator impl (Anthropic Claude)
+│   └── local_generator.py   # ResponseGenerator impl (Ollama, local)
+├── memory/                  # SQLite-backed conversation memory
+├── safety/
+│   ├── emotion_detector.py  # EmotionDetector impl
+│   ├── risk_evaluator.py    # RiskEvaluator impl (keyword-based)
+│   ├── fsm_risk_evaluator.py # FSM RiskEvaluator impl (stateful)
+│   ├── language_detector.py # LanguageDetector impl
+│   └── output_filter.py     # OutputFilter impl
+├── strategy/
+│   ├── base.py              # ConcreteStrategySelector
+│   ├── supportive.py        # SupportiveStrategy (CALM/CONCERNED)
+│   ├── de_escalation.py     # DeEscalationStrategy (ELEVATED)
+│   └── crisis.py            # CrisisStrategy (CRISIS)
+├── ui/
+│   ├── app.py               # Kivy App + ScreenManager
+│   ├── welcome_screen.py    # Splash screen
+│   ├── chat_screen.py       # Main chat interface
+│   ├── crisis_screen.py     # Crisis resources display
+│   ├── insights_screen.py   # Emotional trends dashboard
+│   └── theme.py             # Colors, emotion-to-color map
+├── tests/                   # pytest test suite
+├── resources/
+│   ├── crisis_keywords.txt      # English crisis keywords
+│   ├── crisis_keywords_ar.txt   # Arabic crisis keywords
+│   ├── crisis_hotlines.json     # Country → hotline mapping
+│   ├── emotion_keywords_ar.json # Arabic emotion word sets
+│   └── safehaven.kv             # Kivy layout file
+├── logging_config.py        # Structured logging setup
+├── interfaces.py            # Protocol definitions
+└── models.py                # Dataclass models
 ```
 
-**Pipeline:** UI → EmotionDetector → RiskEvaluator → ResponseGenerator → OutputFilter → UI
+## Pipeline
+
+```
+UI (Kivy) → LanguageDetector → EmotionDetector → FSM RiskEvaluator → StrategySelector → ResponseGenerator → OutputFilter → UI
+```
+
+## Design Patterns
+
+| Pattern | Where | Why |
+|---------|-------|-----|
+| **Strategy** | `StrategySelector` picks `ResponseStrategy` by FSM state | Swap response behavior without changing controller |
+| **FSM** | `FSMRiskEvaluator` tracks escalation states | Stateful risk assessment across conversation turns |
+| **Pipeline** | `ChatController.handle_message()` | Each stage transforms data for the next |
+| **Observer** | UI ← Controller (callback on response) | Decouples UI from business logic |
+| **Repository** | `ConversationMemory` | Abstracts storage (SQLite today, anything tomorrow) |
+| **Dependency Injection** | Controller accepts Protocol-typed dependencies | Easy testing with mocks, swappable implementations |

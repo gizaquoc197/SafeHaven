@@ -1,24 +1,27 @@
 # SafeHaven — Design Document
 
 > **Course Project — Safety-Aware Mental Health Chatbot**
-> Version 1.0 · February 2026
+> Version 2.0 · February 2026
 
 ---
 
 ## 1. Project Overview
 
-**SafeHaven** is a desktop chatbot that provides empathetic conversational support while actively monitoring for signs of emotional distress or crisis. It uses an API-based LLM (Anthropic Claude) for response generation, layered behind a safety pipeline that detects emotion, evaluates risk, and filters output.
+**SafeHaven** is a desktop chatbot that provides empathetic conversational support while actively monitoring for signs of emotional distress or crisis. It uses an API-based LLM (Anthropic Claude) for response generation, layered behind a safety pipeline that detects language, analyzes emotion, evaluates risk via a finite state machine, selects response strategies, and filters output.
 
 ### Scope
 
 | In Scope | Out of Scope |
 |----------|--------------|
-| English-language text chat | Multilingual support |
-| Desktop GUI (Tkinter) | Web or mobile deployment |
-| API-based LLM (Anthropic Claude) | Local/fine-tuned models |
-| Keyword + heuristic risk detection | Clinical-grade NLP |
+| English + Arabic text chat | Other languages |
+| Desktop GUI (Kivy) | Web or mobile deployment |
+| API-based LLM (Anthropic Claude) | Fine-tuned models |
+| Local LLM option (Ollama) | Cloud-hosted local models |
+| FSM-based risk detection | Clinical-grade NLP |
+| Strategy-driven response generation | Hardcoded response logic |
 | SQLite conversation storage | Cloud database / auth |
 | Crisis resource display | Actual crisis intervention |
+| Emotional insights dashboard | Real-time analytics |
 | 3 demo scenarios | Production deployment |
 
 **Important disclaimer:** SafeHaven is a course project demonstrating safety-aware architecture. It is **not** a clinical tool and must not be used as a substitute for professional mental health support.
@@ -32,10 +35,17 @@
 ```
 ┌─────────────────────────────────────────────────────┐
 │                   PRESENTATION                       │
-│              Tkinter Chat Window                     │
-│         (input box, message list, modal)             │
+│                Kivy ScreenManager                    │
+│   (welcome, chat, crisis, insights screens)          │
 └──────────────────────┬──────────────────────────────┘
                        │ user text
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│                 LANGUAGE DETECTION                    │
+│         LanguageDetector.detect_language(text)        │
+│              → 'en' | 'ar'                           │
+└──────────────────────┬──────────────────────────────┘
+                       │ language code
                        ▼
 ┌─────────────────────────────────────────────────────┐
 │                   PROCESSING                         │
@@ -53,10 +63,22 @@
                        ▼
 ┌─────────────────────────────────────────────────────┐
 │                    DECISION                          │
-│              RiskEvaluator                           │
+│           FSMRiskEvaluator (stateful)                │
 │     evaluate(UserState) → RiskLevel                  │
+│     FSM: CALM → CONCERNED → ELEVATED → CRISIS       │
 └──────────────────────┬──────────────────────────────┘
-                       │ RiskLevel
+                       │ RiskLevel + FSM state
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│               STRATEGY SELECTION                     │
+│     StrategySelector.select(risk, fsm_state)         │
+│        → ResponseStrategy                            │
+│                                                      │
+│     CALM/CONCERNED → SupportiveStrategy              │
+│     ELEVATED       → DeEscalationStrategy            │
+│     CRISIS         → CrisisStrategy                  │
+└──────────────────────┬──────────────────────────────┘
+                       │ strategy
                        ▼
               ┌────────┴────────┐
               │                 │
@@ -66,21 +88,23 @@
 ┌─────────────────────┐  ┌──────────────┐
 │     GENERATION      │  │ CRISIS PATH  │
 │  ResponseGenerator  │  │ Lock input,  │
-│  generate(context)  │  │ show modal   │
-│        → str        │  │ with hotline │
+│  generate(context)  │  │ show crisis  │
+│  (system prompt     │  │ screen with  │
+│   from strategy)    │  │ hotlines     │
 └─────────┬───────────┘  └──────────────┘
           │ raw response
           ▼
 ┌─────────────────────────────────────────────────────┐
 │                   VALIDATION                         │
 │   OutputFilter.validate(response, risk) → str        │
+│   + Strategy.post_process(response) → str            │
 │   (strip harmful content, enforce tone)              │
 └──────────────────────┬──────────────────────────────┘
                        │ safe response
                        ▼
 ┌─────────────────────────────────────────────────────┐
 │                   PRESENTATION                       │
-│              Display response in chat                │
+│   Display response in chat (emotion-colored bubble)  │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -88,11 +112,13 @@
 
 | Layer | Purpose | Key Rule |
 |-------|---------|----------|
-| **Presentation** | Renders UI, captures input | Never calls LLM directly |
+| **Presentation** | Renders Kivy UI, captures input | Never calls LLM directly |
+| **Language Detection** | Identifies input language | Runs before emotion detection |
 | **Processing** | Extracts emotion, stores messages | Stateless detection, stateful storage |
-| **Decision** | Evaluates risk from UserState | Single source of risk truth |
-| **Generation** | Calls LLM API with context | Only called if risk ≤ MEDIUM |
-| **Validation** | Filters LLM output | Last gate before display |
+| **Decision** | FSM evaluates risk from UserState | Single source of risk truth; stateful per session |
+| **Strategy Selection** | Picks response strategy by FSM state | Decouples strategy from controller logic |
+| **Generation** | Calls LLM API with strategy-built prompt | Only called if risk ≤ MEDIUM |
+| **Validation** | Filters LLM output + strategy post-processing | Last gate before display |
 
 ---
 
@@ -104,6 +130,13 @@ All models live in `safehaven/models.py`.
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
+
+
+class FSMState(Enum):
+    CALM = "calm"
+    CONCERNED = "concerned"
+    ELEVATED = "elevated"
+    CRISIS = "crisis"
 
 
 class EmotionLabel(Enum):
@@ -134,6 +167,7 @@ class Message:
     timestamp: datetime = field(default_factory=datetime.now)
     emotion: EmotionLabel | None = None
     risk_level: RiskLevel = RiskLevel.LOW
+    language: str = "en"
 
 
 @dataclass
@@ -142,6 +176,8 @@ class UserState:
     risk_level: RiskLevel
     message_count: int
     escalation_history: list[RiskLevel] = field(default_factory=list)
+    language: str = "en"
+    fsm_state: str = "calm"
 
 
 @dataclass
@@ -149,13 +185,9 @@ class ConversationContext:
     recent_messages: list[Message]
     user_state: UserState
     system_prompt: str = ""
+    strategy_name: str = ""
 
-    def to_llm_messages(self) -> list[dict]:
-        """Format as user/assistant message dicts for the Claude API.
-
-        The system prompt is passed separately via the API's ``system``
-        parameter; see ``ClaudeResponseGenerator.generate``.
-        """
+    def to_llm_messages(self) -> list[dict[str, str]]:
         return [{"role": m.role, "content": m.content} for m in self.recent_messages]
 ```
 
@@ -181,13 +213,7 @@ class EmotionDetector(Protocol):
 
 class RiskEvaluator(Protocol):
     def evaluate(self, state: UserState) -> RiskLevel:
-        """Determine risk level from current user state.
-
-        Rules:
-        - HIGH if crisis keywords detected or escalation pattern
-        - MEDIUM if negative emotion with high confidence
-        - LOW otherwise
-        """
+        """Determine risk level from current user state."""
         ...
 
 
@@ -207,24 +233,35 @@ class ConversationMemory(Protocol):
 
 class ResponseGenerator(Protocol):
     def generate(self, context: ConversationContext) -> str:
-        """Call the LLM API and return the raw response text.
-
-        Raises:
-            ConnectionError: If the API is unreachable.
-            ValueError: If context is empty.
-        """
+        """Call the LLM API and return the raw response text."""
         ...
 
 
 class OutputFilter(Protocol):
     def validate(self, response: str, risk: RiskLevel) -> str:
-        """Sanitize LLM output based on current risk level.
+        """Sanitize LLM output based on current risk level."""
+        ...
 
-        - Strip any content that contradicts safety guidelines.
-        - At MEDIUM risk, prepend empathetic framing.
-        - At HIGH risk, this method should not be called (crisis path).
-        Returns the filtered response string.
-        """
+
+class LanguageDetector(Protocol):
+    def detect_language(self, text: str) -> str:
+        """Return ISO 639-1 language code ('en', 'ar')."""
+        ...
+
+
+class ResponseStrategy(Protocol):
+    def build_system_prompt(self, context: ConversationContext) -> str:
+        """Return a system prompt tailored to current risk/emotion state."""
+        ...
+
+    def post_process(self, response: str) -> str:
+        """Optional post-processing of LLM output."""
+        ...
+
+
+class StrategySelector(Protocol):
+    def select(self, risk: RiskLevel, fsm_state: str) -> ResponseStrategy:
+        """Pick appropriate strategy based on FSM state."""
         ...
 ```
 
@@ -275,7 +312,7 @@ class ChatController:
 
         # 5. Crisis path
         if risk == RiskLevel.HIGH:
-            return None  # Signal UI to show crisis modal
+            return None  # Signal UI to show crisis screen
 
         # 6. Generate response
         context = ConversationContext(
@@ -302,39 +339,60 @@ class ChatController:
 
 ```
 safehaven/
-├── main.py                  # Entry point — launches UI
-├── models.py                # Data models (Section 3)
-├── interfaces.py            # Protocol definitions (Section 4)
+├── main.py                      # Entry point — launches UI
+├── models.py                    # Data models (Section 3)
+├── interfaces.py                # Protocol definitions (Section 4)
+├── logging_config.py            # Structured logging setup
 ├── ui/
 │   ├── __init__.py
-│   ├── chat_window.py       # Tkinter main window
-│   └── crisis_modal.py      # Crisis resource popup
+│   ├── app.py                   # Kivy App + ScreenManager
+│   ├── welcome_screen.py        # Splash screen
+│   ├── chat_screen.py           # Main chat interface
+│   ├── crisis_screen.py         # Crisis resource display
+│   ├── insights_screen.py       # Emotional trends dashboard
+│   └── theme.py                 # Colors, emotion-to-color map
 ├── memory/
 │   ├── __init__.py
-│   ├── sqlite_memory.py     # ConversationMemory impl (SQLite)
-│   └── schema.sql           # CREATE TABLE statements
+│   ├── sqlite_memory.py         # ConversationMemory impl (SQLite)
+│   └── schema.sql               # CREATE TABLE statements
 ├── safety/
 │   ├── __init__.py
-│   ├── emotion_detector.py  # EmotionDetector impl
-│   ├── risk_evaluator.py    # RiskEvaluator impl
-│   └── output_filter.py     # OutputFilter impl
+│   ├── emotion_detector.py      # EmotionDetector impl
+│   ├── risk_evaluator.py        # RiskEvaluator impl (keyword-based)
+│   ├── fsm_risk_evaluator.py    # FSM RiskEvaluator impl (stateful)
+│   ├── language_detector.py     # LanguageDetector impl
+│   └── output_filter.py         # OutputFilter impl
 ├── llm/
 │   ├── __init__.py
-│   └── claude_generator.py  # ResponseGenerator impl (Anthropic Claude)
+│   ├── claude_generator.py      # ResponseGenerator impl (Anthropic Claude)
+│   └── local_generator.py       # ResponseGenerator impl (Ollama, local)
+├── strategy/
+│   ├── __init__.py
+│   ├── base.py                  # ConcreteStrategySelector
+│   ├── supportive.py            # SupportiveStrategy (CALM/CONCERNED)
+│   ├── de_escalation.py         # DeEscalationStrategy (ELEVATED)
+│   └── crisis.py                # CrisisStrategy (CRISIS)
 ├── controller/
 │   ├── __init__.py
-│   └── chat_controller.py   # ChatController (orchestrator)
+│   └── chat_controller.py       # ChatController (orchestrator)
 ├── tests/
 │   ├── __init__.py
 │   ├── test_emotion.py
 │   ├── test_risk.py
 │   ├── test_filter.py
 │   ├── test_memory.py
-│   └── test_controller.py   # Integration test with stubs
+│   ├── test_controller.py       # Integration test with stubs
+│   ├── test_fsm.py              # FSM transition tests
+│   ├── test_strategy.py         # Strategy pattern tests
+│   ├── test_language.py         # Language detection tests
+│   └── test_local_generator.py  # Local model tests
 ├── resources/
-│   ├── crisis_hotlines.json  # Country → hotline mapping
-│   └── crisis_keywords.txt   # One keyword/phrase per line
-└── CLAUDE.md                 # Shared LLM context for team
+│   ├── crisis_hotlines.json     # Country → hotline mapping
+│   ├── crisis_keywords.txt      # English crisis keywords
+│   ├── crisis_keywords_ar.txt   # Arabic crisis keywords
+│   ├── emotion_keywords_ar.json # Arabic emotion word sets
+│   └── safehaven.kv             # Kivy layout file
+└── CLAUDE.md                    # Shared LLM context for team
 ```
 
 ---
@@ -405,7 +463,7 @@ safehaven/
 | # | Task | Done When |
 |---|------|-----------|
 | 1 | Final UML diagrams (class + sequence) | In `docs/`, matches actual code |
-| 2 | Design patterns writeup (Observer, Strategy, Pipeline) | 1-page section in report |
+| 2 | Design patterns writeup (Observer, Strategy, FSM, Pipeline) | 1-page section in report |
 | 3 | Demo script — exact inputs for 3 scenarios | Written script with expected outputs |
 | 4 | Record or screenshot demo run | Evidence file in `docs/` |
 | 5 | Individual report sections — each person writes ~1 page | Sections committed to `docs/report/` |
@@ -426,34 +484,60 @@ safehaven/
 
 | Pattern | Where | Why |
 |---------|-------|-----|
-| **Strategy** | `EmotionDetector`, `ResponseGenerator` as Protocols | Swap implementations (stub → real) without changing controller |
-| **Pipeline** | `ChatController.handle_message()` | Each stage transforms data for the next; easy to insert/reorder |
+| **Strategy** | `StrategySelector` picks `ResponseStrategy` by FSM state; strategies: `SupportiveStrategy`, `DeEscalationStrategy`, `CrisisStrategy` | Swap response behavior (system prompt + post-processing) without changing controller logic |
+| **Finite State Machine** | `FSMRiskEvaluator` manages states: CALM → CONCERNED → ELEVATED → CRISIS | Stateful risk tracking across turns; forward-only transitions prevent premature de-escalation |
+| **Pipeline** | `ChatController.handle_message()` — LanguageDetector → EmotionDetector → FSM → Strategy → Generator → Filter | Each stage transforms data for the next; easy to insert/reorder |
 | **Observer** | UI ← Controller (callback on response) | Decouples UI from business logic |
 | **Repository** | `ConversationMemory` | Abstracts storage (SQLite today, anything tomorrow) |
-| **Template Method** | Prompt building in `ConversationContext` | Standard structure with variable parts (emotion, risk) |
+| **Dependency Injection** | Controller accepts Protocol-typed dependencies | Easy testing with mocks, swappable implementations |
+
+### FSM State Diagram
+
+```
+          negative emotion         sustained negative        crisis keyword
+  ┌──────┐  (confidence > 0.6)  ┌───────────┐  (3+ turns) ┌──────────┐         ┌────────┐
+  │ CALM │ ──────────────────→  │ CONCERNED │ ──────────→  │ ELEVATED │ ──────→ │ CRISIS │
+  └──────┘                      └───────────┘              └──────────┘         └────────┘
+     │                               │                          │                    │
+     └── neutral emotion ←───────────┘ (no de-escalation)       │                    │
+         stays in CALM               stays or advances          stays or advances    terminal
+```
+
+**Transition rules:**
+- CALM → CONCERNED: Negative emotion detected with confidence > 0.6
+- CONCERNED → ELEVATED: 3+ consecutive negative emotion turns
+- ELEVATED → CRISIS: Crisis keyword detected or rapid escalation
+- CRISIS: Terminal state for the session (reset only via `clear()`)
+- No backward transitions within a session
 
 ---
 
 ## 8. Demo Scenarios
 
-### Scenario 1 — Normal Conversation (LOW risk)
+### Scenario 1 — Normal Conversation (LOW risk, CALM state)
 
 ```
 User:  "Hi! I had a pretty good day today."
+       → LanguageDetector: 'en'
        → EmotionDetector: HAPPY (0.85)
-       → RiskEvaluator: LOW
-       → LLM generates friendly response
+       → FSMRiskEvaluator: CALM → stays CALM
+       → StrategySelector: SupportiveStrategy
+       → RiskLevel: LOW
+       → LLM generates friendly response (supportive prompt)
        → OutputFilter: passes through unchanged
 
 Bot:   "That's great to hear! What made your day good?"
 ```
 
-### Scenario 2 — Distressed User (MEDIUM risk)
+### Scenario 2 — Distressed User (MEDIUM risk, CONCERNED → ELEVATED)
 
 ```
 User:  "I've been feeling really overwhelmed lately. Nothing seems to work out."
+       → LanguageDetector: 'en'
        → EmotionDetector: SAD (0.78)
-       → RiskEvaluator: MEDIUM (negative emotion, high confidence)
+       → FSMRiskEvaluator: CALM → CONCERNED (negative emotion, high confidence)
+       → StrategySelector: SupportiveStrategy
+       → RiskLevel: MEDIUM
        → LLM generates response with empathetic system prompt
        → OutputFilter: prepends empathetic framing
 
@@ -462,14 +546,17 @@ Bot:   "It sounds like you're going through a really tough time, and that's
         on you most?"
 ```
 
-### Scenario 3 — Crisis Detection (HIGH risk)
+### Scenario 3 — Crisis Detection (HIGH risk, CRISIS state)
 
 ```
 User:  "I don't want to be here anymore. I want to end it all."
+       → LanguageDetector: 'en'
        → EmotionDetector: FEARFUL (0.92)
-       → RiskEvaluator: HIGH (crisis keyword match)
+       → FSMRiskEvaluator: → CRISIS (crisis keyword match)
+       → StrategySelector: CrisisStrategy
+       → RiskLevel: HIGH
        → ChatController returns None
-       → UI locks input, shows crisis modal
+       → UI shows crisis screen
 
 ┌─────────────────────────────────────────┐
 │        ⚠ We Care About You              │
@@ -495,11 +582,17 @@ User:  "I don't want to be here anymore. I want to end it all."
 
 | Producer | Output | Consumer | Input | Match? |
 |----------|--------|----------|-------|--------|
+| `LanguageDetector.detect_language()` | `str` ('en'/'ar') | `UserState.language` | `str` | ✓ |
 | `EmotionDetector.detect()` | `EmotionResult` | `UserState` constructor | `EmotionResult` | ✓ |
 | `UserState` | `UserState` | `RiskEvaluator.evaluate()` | `UserState` | ✓ |
+| `RiskEvaluator.evaluate()` | `RiskLevel` | `StrategySelector.select()` | `RiskLevel` | ✓ |
+| `FSMRiskEvaluator.state` | `str` | `StrategySelector.select()` | `str` (fsm_state) | ✓ |
+| `StrategySelector.select()` | `ResponseStrategy` | `ResponseStrategy.build_system_prompt()` | self | ✓ |
 | `ConversationMemory.get_recent_messages()` | `list[Message]` | `ConversationContext` | `list[Message]` | ✓ |
 | `ConversationContext.to_llm_messages()` | `list[dict]` | Claude API | `list[dict]` | ✓ |
+| `ResponseStrategy.build_system_prompt()` | `str` | `ConversationContext.system_prompt` | `str` | ✓ |
 | `ResponseGenerator.generate()` | `str` | `OutputFilter.validate()` | `str` | ✓ |
+| `ResponseStrategy.post_process()` | `str` | Final response | `str` | ✓ |
 | `RiskEvaluator.evaluate()` | `RiskLevel` | `OutputFilter.validate()` | `RiskLevel` | ✓ |
 | `ChatController.handle_message()` | `str \| None` | UI callback | `str \| None` | ✓ |
 

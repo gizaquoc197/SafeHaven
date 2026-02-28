@@ -64,3 +64,25 @@ class OutputFilter(Protocol):
         Returns the filtered response string.
         """
         ...
+
+
+class LanguageDetector(Protocol):
+    def detect_language(self, text: str) -> str:
+        """Return ISO 639-1 language code ('en', 'ar')."""
+        ...
+
+
+class ResponseStrategy(Protocol):
+    def build_system_prompt(self, context: ConversationContext) -> str:
+        """Return a system prompt tailored to current risk/emotion state."""
+        ...
+
+    def post_process(self, response: str) -> str:
+        """Optional post-processing of LLM output."""
+        ...
+
+
+class StrategySelector(Protocol):
+    def select(self, risk: RiskLevel, fsm_state: str) -> ResponseStrategy:
+        """Pick appropriate strategy based on FSM state."""
+        ...
