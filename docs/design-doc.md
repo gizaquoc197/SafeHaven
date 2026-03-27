@@ -411,28 +411,28 @@ CLAUDE.md                            # Shared LLM context for team (repo root)
 
 ### Team Assignments
 
-| Group | People | Owns |
-|-------|--------|------|
-| **Backend A** | 1 person | `FSMRiskEvaluator`, `LanguageDetector`, wire `ChatController` |
+| Group | Person(s) | Owns |
+|-------|-----------|------|
+| **Backend A** | 1 person | `FSMRiskEvaluator`, `LanguageDetector` |
 | **Backend B** | 1 person | `SupportiveStrategy`, `DeEscalationStrategy`, `CrisisStrategy`, `ConcreteStrategySelector` |
-| **Frontend** | 1 person | `InsightsScreen`, emotion-colored bubbles, Arabic layout hint |
-| **Data & Tests** | 2 people | Keyword lists, unit tests for new modules, demo script |
-| **Docs** | 1 person | UML diagrams, report assembly, presentation slides |
+| **Backend C** | 1 person | Wire `ChatController` (inject FSM + strategies + language), integration tests |
+| **Frontend** | Quoc | `InsightsScreen`, emotion-colored bubbles, Arabic layout hint, UI polish |
+| **Data & Tests** | Quoc & Patrick | Keyword lists, unit tests for new modules, demo script, adversarial filter tests |
+| **Docs** | Quoc | UML diagrams, report assembly, presentation slides |
 
-> Backend A and B can work in parallel once they agree on Day 1 that `fsm_state` is passed as the plain string values defined in `UserState` (`"calm"`, `"concerned"`, `"elevated"`, `"crisis"`). Frontend and Data/Tests are fully independent from Day 1.
+> Backend A and B can work in parallel once they agree on Day 1 that `fsm_state` is passed as the plain string values defined in `UserState` (`"calm"`, `"concerned"`, `"elevated"`, `"crisis"`). Backend C picks up wiring once A and B are done. Frontend, Data & Tests, and Docs are fully independent from Day 1.
 
 ---
 
 ### Dependency / Critical Path
 
 ```
-Backend A: FSMRiskEvaluator
+Backend A: FSMRiskEvaluator + LanguageDetector
+Backend B: Strategies + StrategySelector        (parallel with A)
+                ↓ (both done)
+Backend C: Wire ChatController                  (needs A + B)
                 ↓
-Backend B: ConcreteStrategySelector  (needs FSM state string contract)
-                ↓
-Backend A: Wire ChatController        (needs both FSM + strategies done)
-                ↓
-Data/Tests: Integration tests         (needs wired controller)
+Backend C: Integration tests                    (needs wired controller)
 ```
 
 Frontend → InsightsScreen depends on `ConversationMemory` (already done) — no backend dependency.
@@ -447,7 +447,6 @@ Frontend → InsightsScreen depends on `ConversationMemory` (already done) — n
 |---|------|-----------|
 | A1 | Implement `FSMRiskEvaluator.evaluate()` — CALM→CONCERNED→ELEVATED→CRISIS transitions | `test_fsm.py` passes: single negative emotion → CONCERNED; 3 consecutive → ELEVATED; crisis keyword → CRISIS |
 | A2 | Implement `SimpleLanguageDetector.detect_language()` — Unicode Arabic script check | `detect("مرحبا")` → `'ar'`, `detect("hello")` → `'en'` |
-| A3 | Wire `ChatController`: inject `LanguageDetector` + `FSMRiskEvaluator` + `StrategySelector`; set language on `UserState`; call `StrategySelector` to build system prompt | `test_controller.py` passes with all 3 demo scenarios end-to-end (mocked LLM) |
 
 #### Backend B
 
@@ -457,6 +456,12 @@ Frontend → InsightsScreen depends on `ConversationMemory` (already done) — n
 | B2 | Implement `DeEscalationStrategy.build_system_prompt()` — grounding, safety-aware prompt for ELEVATED | Returns a non-empty system prompt string; `test_strategy.py` passes |
 | B3 | Implement `CrisisStrategy.build_system_prompt()` — minimal LLM framing for CRISIS state | Returns a non-empty system prompt string; `test_strategy.py` passes |
 | B4 | Implement `ConcreteStrategySelector.select()` — maps `fsm_state` string to the correct strategy | `select(HIGH, "crisis")` → `CrisisStrategy`; `select(MEDIUM, "elevated")` → `DeEscalationStrategy`; `select(LOW, "calm")` → `SupportiveStrategy` |
+
+#### Backend C
+
+| # | Task | Done When |
+|---|------|-----------|
+| C1 | Wire `ChatController`: inject `LanguageDetector` + `FSMRiskEvaluator` + `StrategySelector`; set language on `UserState`; call `StrategySelector` to build system prompt | `test_controller.py` passes with all 3 demo scenarios end-to-end (mocked LLM) |
 
 #### Frontend
 
@@ -480,7 +485,7 @@ Frontend → InsightsScreen depends on `ConversationMemory` (already done) — n
 
 ### Week 2 — Integration, Testing, Demo, Documentation
 
-#### Backend A + B (together)
+#### Backend C (+ A and B as needed)
 
 | # | Task | Done When |
 |---|------|-----------|
