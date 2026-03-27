@@ -9,18 +9,22 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
+from kivy.animation import Animation
 from kivy.clock import Clock
-from kivy.graphics import Color, RoundedRectangle
+from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
+from kivy.uix.widget import Widget
 
 from safehaven.ui.theme import (
     BACKGROUND_COLOR,
+    EMOTION_COLORS,
     PRIMARY_COLOR,
+    RISK_COLORS,
     SURFACE_COLOR,
     TEXT_COLOR,
     TEXT_SECONDARY,
@@ -79,7 +83,22 @@ class ChatScreen(Screen):
             self._bg_rect = Rectangle(size=self.size, pos=self.pos)
         self.bind(size=self._update_bg, pos=self._update_bg)
 
-        root = BoxLayout(orientation="vertical", padding=10, spacing=8)
+        root = BoxLayout(orientation="vertical", padding=0, spacing=0)
+
+        # FSM risk-level indicator bar (height=6, colored by current FSM state)
+        self._state_bar = Widget(size_hint_y=None, height=6)
+        self._state_bar_color: list[float] = _hex_to_rgba(RISK_COLORS["calm"])
+        with self._state_bar.canvas:
+            self._state_bar_color_inst = Color(*self._state_bar_color)
+            self._state_bar_rect = Rectangle(
+                size=self._state_bar.size, pos=self._state_bar.pos
+            )
+        self._state_bar.bind(
+            size=self._update_state_bar, pos=self._update_state_bar
+        )
+        root.add_widget(self._state_bar)
+
+        inner = BoxLayout(orientation="vertical", padding=10, spacing=8)
 
         # Scrollable message area
         self._scroll = ScrollView(
@@ -97,7 +116,7 @@ class ChatScreen(Screen):
             minimum_height=self._message_list.setter("height")
         )
         self._scroll.add_widget(self._message_list)
-        root.add_widget(self._scroll)
+        inner.add_widget(self._scroll)
 
         # Input area
         input_row = BoxLayout(size_hint_y=None, height=44, spacing=6)
@@ -122,8 +141,11 @@ class ChatScreen(Screen):
         self._send_btn.bind(on_release=self._on_send)
         input_row.add_widget(self._send_btn)
 
-        root.add_widget(input_row)
+        inner.add_widget(input_row)
+        root.add_widget(inner)
         self.add_widget(root)
+
+        self._thinking_label: Label | None = None
 
         # Welcome message
         self._append_system("Welcome to SafeHaven. How are you feeling today?")
@@ -142,6 +164,7 @@ class ChatScreen(Screen):
         self._text_input.text = ""
         self._append_message("You", text, SURFACE_COLOR)
         self._set_input_enabled(False)
+        self._show_thinking()
 
         thread = threading.Thread(
             target=self._process_in_background, args=(text,), daemon=True
@@ -162,7 +185,17 @@ class ChatScreen(Screen):
             Clock.schedule_once(lambda _dt: self._on_response(response), 0)
 
     def _on_response(self, text: str) -> None:
-        self._append_message("SafeHaven", text, "#E3F2FD")
+        self._hide_thinking()
+
+        # Pick bubble color from detected emotion
+        bubble_color = "#E3F2FD"
+        if self._controller is not None and self._controller.last_emotion is not None:
+            bubble_color = EMOTION_COLORS.get(
+                self._controller.last_emotion, "#E3F2FD"
+            )
+
+        self._append_message("SafeHaven", text, bubble_color)
+        self._update_fsm_bar()
         self._set_input_enabled(True)
         self._text_input.focus = True
 
@@ -215,3 +248,38 @@ class ChatScreen(Screen):
     def _update_bg(self, *_args: object) -> None:
         self._bg_rect.size = self.size
         self._bg_rect.pos = self.pos
+
+    def _update_state_bar(self, *_args: object) -> None:
+        self._state_bar_rect.size = self._state_bar.size
+        self._state_bar_rect.pos = self._state_bar.pos
+
+    def _update_fsm_bar(self) -> None:
+        """Repaint the FSM state bar and pulse it to draw attention."""
+        if self._controller is None:
+            return
+        fsm_state = self._controller.fsm_state
+        color = _hex_to_rgba(RISK_COLORS.get(fsm_state, RISK_COLORS["calm"]))
+        self._state_bar_color_inst.rgba = color
+        self._state_bar_rect.size = self._state_bar.size
+        # Brief animation pulse: shrink height then restore
+        anim = Animation(height=2, duration=0.15) + Animation(height=6, duration=0.15)
+        anim.start(self._state_bar)
+
+    def _show_thinking(self) -> None:
+        lbl = Label(
+            text="SafeHaven is thinking…",
+            font_size="13sp",
+            color=_hex_to_rgba(TEXT_SECONDARY),
+            size_hint_y=None,
+            height=30,
+            halign="center",
+        )
+        lbl.bind(width=lambda inst, w: setattr(inst, "text_size", (w, None)))
+        self._thinking_label = lbl
+        self._message_list.add_widget(lbl)
+        Clock.schedule_once(lambda _dt: self._scroll_to_bottom(), 0.05)
+
+    def _hide_thinking(self) -> None:
+        if self._thinking_label is not None:
+            self._message_list.remove_widget(self._thinking_label)
+            self._thinking_label = None

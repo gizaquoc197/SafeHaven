@@ -39,20 +39,27 @@ class SafeHavenApp(App):
 
         # Apply controller if set_controller() was called before build()
         if self._pending_controller is not None:
-            chat_screen = sm.get_screen("chat")
-            assert isinstance(chat_screen, ChatScreen)
-            chat_screen.set_controller(self._pending_controller)
+            self._apply_controller(self._pending_controller)
 
         return sm
 
     def set_controller(self, controller: ChatController) -> None:
-        """Inject the ChatController into the chat screen (Observer pattern).
+        """Inject the ChatController and memory into the relevant screens.
 
         Can be called before or after build().
         """
         self._pending_controller = controller
-        # If build() already ran, apply immediately
         if hasattr(self, "_screen_manager"):
-            chat_screen = self._screen_manager.get_screen("chat")
-            assert isinstance(chat_screen, ChatScreen)
-            chat_screen.set_controller(controller)
+            self._apply_controller(controller)
+
+    def _apply_controller(self, controller: ChatController) -> None:
+        """Wire controller into ChatScreen and memory into InsightsScreen."""
+        sm = self._screen_manager
+
+        chat_screen = sm.get_screen("chat")
+        assert isinstance(chat_screen, ChatScreen)
+        chat_screen.set_controller(controller)
+
+        insights_screen = sm.get_screen("insights")
+        assert isinstance(insights_screen, InsightsScreen)
+        insights_screen.set_memory(controller.memory)

@@ -23,3 +23,15 @@ BACKGROUND_COLOR = "#FAFAFA"
 SURFACE_COLOR = "#FFFFFF"
 TEXT_COLOR = "#212121"
 TEXT_SECONDARY = "#757575"
+
+# FSM risk-level colors (state label → hex)
+RISK_COLORS: dict[str, str] = {
+    "calm":      "#4CAF50",  # green
+    "concerned": "#FFC107",  # amber
+    "elevated":  "#FF9800",  # orange
+    "crisis":    "#F44336",  # red
+}
+
+# Insights dashboard colors
+DASHBOARD_BG   = "#1E1E26"
+DASHBOARD_CARD = "#2E3340"

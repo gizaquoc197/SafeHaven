@@ -14,4 +14,9 @@ def setup_logging(*, level: int = logging.INFO) -> None:
 
     Call once at startup (e.g. in ``main.py``) before any other module runs.
     """
-    raise NotImplementedError  # TODO: implement in logging upgrade
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
+    logging.root.setLevel(level)
+    logging.root.addHandler(handler)

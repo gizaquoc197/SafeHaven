@@ -12,9 +12,25 @@ class DeEscalationStrategy:
     """Careful, grounding prompting for elevated-risk conversations."""
 
     def build_system_prompt(self, context: ConversationContext) -> str:
-        """Return a de-escalation system prompt."""
-        raise NotImplementedError  # TODO: implement in strategy upgrade
+        """Return a de-escalation system prompt grounded in DBT Distress Tolerance."""
+        lang = context.user_state.language
+        lang_instruction = "Respond in Arabic." if lang == "ar" else "Respond in English."
+        return f"""You are SafeHaven. The user is experiencing elevated distress. Use DBT Distress Tolerance techniques.
+
+Grounding and stabilization tools to offer:
+- TIPP: Temperature (cold water on face/wrists), Intense exercise, Paced breathing, Progressive muscle relaxation
+- 5-4-3-2-1 grounding: Guide through 5 things you see, 4 you hear, 3 you can touch, 2 you smell, 1 you taste
+- STOP skill: Stop, Take a step back, Observe, Proceed mindfully
+
+Avoid "why" questions — they increase distress. Do not challenge or reframe.
+Structure each response: Acknowledge distress → Validate feelings → Offer one specific grounding exercise.
+Keep responses shorter and more concrete (100–150 words).
+Include the 988 Suicide & Crisis Lifeline in every response.
+
+{lang_instruction}"""
 
     def post_process(self, response: str) -> str:
-        """Add safety framing to the response."""
-        raise NotImplementedError  # TODO: implement in strategy upgrade
+        """Append 988 reminder if not already present."""
+        if "988" not in response:
+            return response + "\n\nRemember: If you're in crisis, please call or text 988."
+        return response
