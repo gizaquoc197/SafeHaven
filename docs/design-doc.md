@@ -1,7 +1,7 @@
 # SafeHaven — Design Document
 
 > **Course Project — Safety-Aware Mental Health Chatbot**
-> Version 2.0 · February 2026
+> Version 2.1 · March 2026 — revised for 2-week sprint
 
 ---
 
@@ -114,13 +114,13 @@
 
 | Layer | Purpose | Key Rule | Status |
 |-------|---------|----------|--------|
-| **Presentation** | Renders UI, captures input | Never calls LLM directly | Implemented (Kivy) |
-| **Language Detection** | Identifies input language | Runs before emotion detection | Stub |
-| **Processing** | Extracts emotion, stores messages | Stateless detection, stateful storage | Implemented |
-| **Decision** | Evaluates risk from UserState | Single source of risk truth | Implemented (`KeywordRiskEvaluator`); FSM stubbed |
-| **Strategy Selection** | Picks response strategy by FSM state | Decouples strategy from controller logic | Stub |
-| **Generation** | Calls LLM API with strategy-built prompt | Only called if risk ≤ MEDIUM | Implemented |
-| **Validation** | Filters LLM output + strategy post-processing | Last gate before display | Implemented |
+| **Presentation** | Renders UI, captures input | Never calls LLM directly | ✅ Implemented (Kivy, 4 screens) |
+| **Language Detection** | Identifies input language | Runs before emotion detection | ❌ Stub — `detect_language()` raises `NotImplementedError` |
+| **Processing** | Extracts emotion, stores messages | Stateless detection, stateful storage | ✅ Implemented |
+| **Decision** | Evaluates risk from UserState | Single source of risk truth | ⚠️ `KeywordRiskEvaluator` active; `FSMRiskEvaluator.evaluate()` stubbed |
+| **Strategy Selection** | Picks response strategy by FSM state | Decouples strategy from controller logic | ❌ Stub — `select()` raises `NotImplementedError`; not wired in controller |
+| **Generation** | Calls LLM API with strategy-built prompt | Only called if risk ≤ MEDIUM | ✅ Implemented (Claude + Ollama) |
+| **Validation** | Filters LLM output + strategy post-processing | Last gate before display | ✅ Implemented |
 
 ---
 
@@ -401,86 +401,119 @@ CLAUDE.md                            # Shared LLM context for team (repo root)
 
 ---
 
-## 6. Weekly Timeline — Task Board
+## 6. Sprint Plan — 2-Week Task Board
 
-> **Principle:** Tasks, not roles. Anyone picks up any task. Each task is ~3 hours and has a binary "done" check.
+> **Context:** Weeks 1–4 of the original plan are complete. The codebase has working infrastructure (models, interfaces, controller, UI, memory, emotion detection, keyword risk, output filter, Claude/Ollama generators). The remaining work is implementing the three stubbed modules, wiring them into the controller, and preparing the demo and report.
 
-### Week 1 — Design & Setup
+> **Principle:** Each task has a binary "done" check. Aim for ~3 hours per task. The critical path runs through Backend A — unblock it first.
 
-| # | Task | Done When |
-|---|------|-----------|
-| 1 | Create GitHub repo with folder structure and `.gitignore` | Repo exists, everyone can clone |
-| 2 | Write `models.py` with all dataclasses/enums | File passes `mypy --strict` |
-| 3 | Write `interfaces.py` with all Protocol classes | File passes `mypy --strict` |
-| 4 | Create `crisis_keywords.txt` (30+ phrases) | File exists in `resources/` |
-| 5 | Create `crisis_hotlines.json` (at least 3 countries) | Valid JSON, loadable |
-| 6 | Draw UML class diagram (PlantUML or draw.io) | PNG/SVG in `docs/` |
-| 7 | Write `CLAUDE.md` and place in repo root | File committed |
+---
 
-### Week 2 — Core Module Stubs
+### Team Assignments
 
-| # | Task | Done When |
-|---|------|-----------|
-| 1 | Write `schema.sql` + `sqlite_memory.py` (store + retrieve) | `test_memory.py` passes — stores and retrieves 3 messages |
-| 2 | Write `emotion_detector.py` — keyword-based stub | `detect("I feel great")` → `HAPPY`, `detect("I'm so worried")` → `ANXIOUS` |
-| 3 | Write `risk_evaluator.py` — keyword list check + threshold | Returns `HIGH` for any crisis keyword match |
-| 4 | Write `output_filter.py` — regex blocklist | Strips "you should just…" patterns, returns cleaned text |
-| 5 | Write `claude_generator.py` — call Claude API, return text | Returns a string for a simple prompt (manual test with API key) |
-| 6 | Build basic `chat_window.py` — input box + message list | Window opens, text appears on send button click |
+| Group | People | Owns |
+|-------|--------|------|
+| **Backend A** | 1 person | `FSMRiskEvaluator`, `LanguageDetector`, wire `ChatController` |
+| **Backend B** | 1 person | `SupportiveStrategy`, `DeEscalationStrategy`, `CrisisStrategy`, `ConcreteStrategySelector` |
+| **Frontend** | 1 person | `InsightsScreen`, emotion-colored bubbles, Arabic layout hint |
+| **Data & Tests** | 2 people | Keyword lists, unit tests for new modules, demo script |
+| **Docs** | 1 person | UML diagrams, report assembly, presentation slides |
 
-### Week 3 — Module Logic
+> Backend A and B can work in parallel once they agree on Day 1 that `fsm_state` is passed as the plain string values defined in `UserState` (`"calm"`, `"concerned"`, `"elevated"`, `"crisis"`). Frontend and Data/Tests are fully independent from Day 1.
 
-| # | Task | Done When |
-|---|------|-----------|
-| 1 | Risk evaluator FSM: track escalation over 3+ messages | `test_risk.py` — 3 sad messages in a row → `MEDIUM` |
-| 2 | Prompt template system — build system prompt from `UserState` | `ConversationContext.to_llm_messages()` includes emotion-aware system prompt |
-| 3 | Output filter — tone adjustment for `MEDIUM` risk | Prepends empathetic framing sentence at `MEDIUM` |
-| 4 | `chat_controller.py` — wire `handle_message()` pipeline | `test_controller.py` passes with all-stub dependencies |
-| 5 | `crisis_modal.py` — popup with hotline info | Modal appears, blocks input, has a close/acknowledge button |
-| 6 | Memory: add `clear()` + session reset | New session starts with empty history |
+---
 
-### Week 4 — Integration
+### Dependency / Critical Path
 
-| # | Task | Done When |
-|---|------|-----------|
-| 1 | Wire `chat_window.py` → `ChatController` | Typed message flows through pipeline and response appears |
-| 2 | Wire `ChatController` → `claude_generator.py` (real API) | Real LLM response appears in chat window |
-| 3 | Wire crisis path: `handle_message()` returns `None` → show modal | Typing "I want to end it all" shows crisis modal |
-| 4 | End-to-end test: normal conversation (3 turns) | Passes in CI (with mocked LLM) |
-| 5 | End-to-end test: escalation → crisis | Passes in CI (with mocked LLM) |
-| 6 | Config file for API key + model name | `.env` file loaded, not hardcoded |
+```
+Backend A: FSMRiskEvaluator
+                ↓
+Backend B: ConcreteStrategySelector  (needs FSM state string contract)
+                ↓
+Backend A: Wire ChatController        (needs both FSM + strategies done)
+                ↓
+Data/Tests: Integration tests         (needs wired controller)
+```
 
-### Week 5 — Testing & Hardening
+Frontend → InsightsScreen depends on `ConversationMemory` (already done) — no backend dependency.
+
+---
+
+### Week 1 — Implement Stubs + Wire Controller
+
+#### Backend A
 
 | # | Task | Done When |
 |---|------|-----------|
-| 1 | Unit tests: `EmotionDetector` — 10+ cases | All pass, coverage > 80% |
-| 2 | Unit tests: `RiskEvaluator` — edge cases | Empty input, repeated neutral, boundary transitions |
-| 3 | Unit tests: `OutputFilter` — adversarial LLM responses | Strips harmful patterns in 5+ test cases |
-| 4 | Integration test: full pipeline with mock LLM | `test_controller.py` covers all 3 demo scenarios |
-| 5 | Error handling: API timeout, empty input, SQLite lock | App doesn't crash — shows user-friendly error |
-| 6 | Crisis keyword list review + expansion | Peer-reviewed list, 50+ entries |
-| 7 | UI polish: scrolling, timestamps, color coding by risk | Looks presentable for demo |
+| A1 | Implement `FSMRiskEvaluator.evaluate()` — CALM→CONCERNED→ELEVATED→CRISIS transitions | `test_fsm.py` passes: single negative emotion → CONCERNED; 3 consecutive → ELEVATED; crisis keyword → CRISIS |
+| A2 | Implement `SimpleLanguageDetector.detect_language()` — Unicode Arabic script check | `detect("مرحبا")` → `'ar'`, `detect("hello")` → `'en'` |
+| A3 | Wire `ChatController`: inject `LanguageDetector` + `FSMRiskEvaluator` + `StrategySelector`; set language on `UserState`; call `StrategySelector` to build system prompt | `test_controller.py` passes with all 3 demo scenarios end-to-end (mocked LLM) |
 
-### Week 6 — Polish & Documentation
+#### Backend B
 
 | # | Task | Done When |
 |---|------|-----------|
-| 1 | Final UML diagrams (class + sequence) | In `docs/`, matches actual code |
-| 2 | Design patterns writeup (Observer, Strategy, FSM, Pipeline) | 1-page section in report |
-| 3 | Demo script — exact inputs for 3 scenarios | Written script with expected outputs |
-| 4 | Record or screenshot demo run | Evidence file in `docs/` |
-| 5 | Individual report sections — each person writes ~1 page | Sections committed to `docs/report/` |
-| 6 | README with setup instructions | Clone → install → run works in 3 commands |
+| B1 | Implement `SupportiveStrategy.build_system_prompt()` — warm, empathetic prompt for CALM/CONCERNED | Returns a non-empty system prompt string; `test_strategy.py` passes |
+| B2 | Implement `DeEscalationStrategy.build_system_prompt()` — grounding, safety-aware prompt for ELEVATED | Returns a non-empty system prompt string; `test_strategy.py` passes |
+| B3 | Implement `CrisisStrategy.build_system_prompt()` — minimal LLM framing for CRISIS state | Returns a non-empty system prompt string; `test_strategy.py` passes |
+| B4 | Implement `ConcreteStrategySelector.select()` — maps `fsm_state` string to the correct strategy | `select(HIGH, "crisis")` → `CrisisStrategy`; `select(MEDIUM, "elevated")` → `DeEscalationStrategy`; `select(LOW, "calm")` → `SupportiveStrategy` |
 
-### Week 7 — Buffer + Presentation
+#### Frontend
 
 | # | Task | Done When |
 |---|------|-----------|
-| 1 | Dry-run presentation (team rehearsal) | Everyone knows their part |
-| 2 | Fix any remaining bugs from testing | All tests green |
-| 3 | Final report assembly + proofread | Single PDF submitted |
-| 4 | Presentation slides (5-8 slides) | Covers architecture, demo, learnings |
+| F1 | Build `InsightsScreen` — emotion timeline from `ConversationMemory` (bar or list of past emotion labels + counts) | Screen shows real data from SQLite on navigation; no crashes on empty history |
+| F2 | Emotion-colored message bubbles in `chat_screen.py` — map `EmotionLabel` to bubble background via `theme.py` | SAD messages appear in a distinct color from HAPPY; ANXIOUS/FEARFUL differ visually |
+| F3 | Arabic RTL layout hint — if `language == 'ar'`, set `base_direction='rtl'` on the input and bubble labels | Arabic text is right-aligned in chat |
+
+#### Data & Tests
+
+| # | Task | Done When |
+|---|------|-----------|
+| D1 | Expand `crisis_keywords.txt` to 50+ entries; peer-review for false positives | File has 50+ lines; running `pytest test_risk.py` still passes |
+| D2 | Expand `crisis_keywords_ar.txt` — equivalent Arabic phrases | File has 20+ Arabic entries; spot-checked by a native speaker or translation tool |
+| D3 | Fill in `test_fsm.py` — edge cases: empty input, neutral emotion (no transition), rapid escalation, `clear()` resets state | All test cases pass |
+| D4 | Fill in `test_strategy.py` — each strategy returns a non-empty prompt; selector maps all 4 FSM states correctly | All test cases pass |
+| D5 | Fill in `test_language.py` — English, Arabic, mixed, empty string | All test cases pass |
+
+---
+
+### Week 2 — Integration, Testing, Demo, Documentation
+
+#### Backend A + B (together)
+
+| # | Task | Done When |
+|---|------|-----------|
+| I1 | End-to-end integration test: Scenario 1 (normal conversation, 3 turns, LOW risk) | Passes with mocked LLM; FSM stays CALM; SupportiveStrategy prompt used |
+| I2 | End-to-end integration test: Scenario 2 (distressed user, MEDIUM risk, CONCERNED→ELEVATED) | Passes with mocked LLM; FSM advances; DeEscalationStrategy prompt used |
+| I3 | End-to-end integration test: Scenario 3 (crisis detection, HIGH risk) | `handle_message()` returns `None`; UI navigates to crisis screen |
+| I4 | Error handling: API timeout, empty input, SQLite lock | App shows user-friendly error message; no crash or unhandled exception |
+
+#### Frontend
+
+| # | Task | Done When |
+|---|------|-----------|
+| F4 | UI polish: timestamps on messages, "thinking…" indicator while LLM call is in-flight | Timestamps visible; spinner or label shown between send and response |
+| F5 | Manual smoke test: run all 3 demo scenarios live with real API key | Screenshots captured for `docs/demo/` |
+
+#### Data & Tests
+
+| # | Task | Done When |
+|---|------|-----------|
+| D6 | Write demo script — exact user inputs and expected outputs for all 3 scenarios | Markdown file committed to `docs/demo-script.md` |
+| D7 | Adversarial output filter tests — 5+ LLM responses containing harmful patterns | `test_filter.py` strips all harmful patterns; all pass |
+| D8 | `mypy --strict safehaven/` passes with zero errors after all new code | CI check green |
+
+#### Docs
+
+| # | Task | Done When |
+|---|------|-----------|
+| W1 | Final UML class diagram (PlantUML or draw.io) — reflects actual wired code | PNG/SVG in `docs/`; all 6 design patterns annotated |
+| W2 | Sequence diagram for `handle_message()` through the full target pipeline | PNG/SVG in `docs/` |
+| W3 | Design patterns writeup — 1 page covering Strategy, FSM, Pipeline, Observer, Repository, DI | Committed to `docs/report/` |
+| W4 | Individual report sections — each person writes ~1 page on their contribution | Sections in `docs/report/` |
+| W5 | Presentation slides (5–8 slides): architecture, patterns, demo, learnings | Dry-run rehearsal done; everyone knows their part |
+| W6 | Final report assembly + proofread | Single PDF ready for submission |
 
 ---
 
@@ -488,12 +521,12 @@ CLAUDE.md                            # Shared LLM context for team (repo root)
 
 | Pattern | Where | Status | Why |
 |---------|-------|--------|-----|
-| **Strategy** | `StrategySelector` picks `ResponseStrategy` by FSM state; strategies: `SupportiveStrategy`, `DeEscalationStrategy`, `CrisisStrategy` | Defined, not yet wired | Swap response behavior (system prompt + post-processing) without changing controller logic |
-| **Finite State Machine** | `FSMRiskEvaluator` manages states: CALM → CONCERNED → ELEVATED → CRISIS | Defined, not yet wired (`KeywordRiskEvaluator` active) | Stateful risk tracking across turns; forward-only transitions prevent premature de-escalation |
-| **Pipeline** | `ChatController.handle_message()` — EmotionDetector → RiskEvaluator → Generator → Filter (current) | Implemented (partial pipeline) | Each stage transforms data for the next; easy to insert/reorder |
-| **Observer** | UI ← Controller (callback on response) | Implemented | Decouples UI from business logic |
-| **Repository** | `ConversationMemory` | Implemented | Abstracts storage (SQLite today, anything tomorrow) |
-| **Dependency Injection** | Controller accepts Protocol-typed dependencies | Implemented | Easy testing with mocks, swappable implementations |
+| **Strategy** | `StrategySelector` picks `ResponseStrategy` by FSM state; strategies: `SupportiveStrategy`, `DeEscalationStrategy`, `CrisisStrategy` | ❌ Classes exist, all `build_system_prompt()` / `select()` raise `NotImplementedError`; not wired in controller | Swap response behavior (system prompt + post-processing) without changing controller logic |
+| **Finite State Machine** | `FSMRiskEvaluator` manages states: CALM → CONCERNED → ELEVATED → CRISIS | ❌ Class exists, `evaluate()` raises `NotImplementedError`; `KeywordRiskEvaluator` is the active evaluator | Stateful risk tracking across turns; forward-only transitions prevent premature de-escalation |
+| **Pipeline** | `ChatController.handle_message()` — EmotionDetector → RiskEvaluator → Generator → Filter | ⚠️ Implemented with partial pipeline (no LanguageDetector, no StrategySelector yet) | Each stage transforms data for the next; easy to insert/reorder |
+| **Observer** | UI ← Controller (callback on response) | ✅ Implemented | Decouples UI from business logic |
+| **Repository** | `ConversationMemory` backed by SQLite | ✅ Implemented | Abstracts storage (SQLite today, anything tomorrow) |
+| **Dependency Injection** | Controller accepts Protocol-typed dependencies | ✅ Implemented | Easy testing with mocks, swappable implementations |
 
 ### FSM State Diagram
 

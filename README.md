@@ -75,15 +75,15 @@ safehaven/
 ├── memory/                  # SQLite-backed conversation memory
 ├── safety/
 │   ├── emotion_detector.py  # EmotionDetector impl
-│   ├── risk_evaluator.py    # RiskEvaluator impl (keyword-based)
-│   ├── fsm_risk_evaluator.py # FSM RiskEvaluator impl (stateful)
-│   ├── language_detector.py # LanguageDetector impl
+│   ├── risk_evaluator.py    # RiskEvaluator impl (keyword-based, active)
+│   ├── fsm_risk_evaluator.py # FSM RiskEvaluator (stub — not yet active)
+│   ├── language_detector.py # LanguageDetector (stub — not yet wired)
 │   └── output_filter.py     # OutputFilter impl
 ├── strategy/
-│   ├── base.py              # ConcreteStrategySelector
-│   ├── supportive.py        # SupportiveStrategy (CALM/CONCERNED)
-│   ├── de_escalation.py     # DeEscalationStrategy (ELEVATED)
-│   └── crisis.py            # CrisisStrategy (CRISIS)
+│   ├── base.py              # ConcreteStrategySelector (stub — not yet wired)
+│   ├── supportive.py        # SupportiveStrategy — CALM/CONCERNED (stub)
+│   ├── de_escalation.py     # DeEscalationStrategy — ELEVATED (stub)
+│   └── crisis.py            # CrisisStrategy — CRISIS (stub)
 ├── ui/
 │   ├── app.py               # Kivy App + ScreenManager
 │   ├── welcome_screen.py    # Splash/welcome screen
@@ -119,9 +119,9 @@ UI (Kivy) → LanguageDetector → EmotionDetector → FSM RiskEvaluator → Str
 
 | Pattern | Where | Status | Why |
 |---------|-------|--------|-----|
-| **Strategy** | `StrategySelector` picks `ResponseStrategy` by FSM state | Defined, not yet wired | Swap response behavior without changing controller |
-| **FSM** | `FSMRiskEvaluator` tracks escalation states | Defined, not yet wired | Stateful risk assessment across conversation turns |
-| **Pipeline** | `ChatController.handle_message()` | Implemented | Each stage transforms data for the next |
+| **Strategy** | `StrategySelector` picks `ResponseStrategy` by FSM state | Stub — not yet wired | Swap response behavior without changing controller |
+| **FSM** | `FSMRiskEvaluator` tracks escalation states | Stub — `KeywordRiskEvaluator` is active | Stateful risk assessment across conversation turns |
+| **Pipeline** | `ChatController.handle_message()` | Implemented (partial — no LanguageDetector/StrategySelector yet) | Each stage transforms data for the next |
 | **Observer** | UI ← Controller (callback on response) | Implemented | Decouples UI from business logic |
 | **Repository** | `ConversationMemory` | Implemented | Abstracts storage (SQLite today, anything tomorrow) |
 | **Dependency Injection** | Controller accepts Protocol-typed dependencies | Implemented | Easy testing with mocks, swappable implementations |
