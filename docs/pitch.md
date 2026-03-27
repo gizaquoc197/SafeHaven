@@ -9,14 +9,17 @@
 
 "SafeHaven demonstrates how classical Gang of Four design patterns — Strategy, Pipeline,
 FSM, Observer, Repository, and Dependency Injection — can be systematically composed to
-create a formally architected safety-aware mental health chatbot. Commercial systems like
-Wysa implement crisis detection, and recent work (MindfulDiary, CHI 2024) applies FSMs to
-therapeutic dialogue flow — but no prior work formally applies GoF patterns to this domain,
-or uses FSM states to model risk levels with monotonic escalation constraints. SafeHaven's
-contribution is architectural and pedagogical: proving that well-known design patterns,
-deliberately composed, address safety gaps identified in peer-reviewed evaluations of
-existing chatbots (Pichowicz et al., Scientific Reports 2025 found zero adequate crisis
-responses among 29 chatbots tested)."
+create a formally architected safety-aware mental health chatbot. This architecture is
+named the **Stateful Safety Pipeline (SSP)**. Commercial systems like Wysa implement crisis
+detection, and recent work (MindfulDiary, CHI 2024) applies FSMs to therapeutic dialogue
+flow — but no prior work formally applies GoF patterns to this domain, or uses FSM states
+to model risk levels with monotonic escalation constraints. SafeHaven's contribution is
+architectural and pedagogical: proving that well-known design patterns, deliberately
+composed, address safety gaps identified in peer-reviewed evaluations of existing chatbots
+(Pichowicz et al., Scientific Reports 2025 found zero adequate crisis responses among 29
+chatbots tested). A February 2026 arXiv paper (TherapyProbe, arXiv:2602.22775) explicitly
+calls for cumulative risk scoring and escalation-to-crisis protocols — SafeHaven is a
+direct implementation of that recommendation."
 
 ---
 

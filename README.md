@@ -1,6 +1,6 @@
 # SafeHaven
 
-Safety-aware mental health chatbot built with Python and the Anthropic Claude API. Uses a Kivy UI with keyword-based risk assessment. FSM-based risk evaluation and strategy-driven response generation are architected but not yet wired in.
+Safety-aware mental health chatbot built with Python and the Anthropic Claude API. Implements the **Stateful Safety Pipeline (SSP)** — six Gang of Four design patterns composed to create a formally architected, risk-adaptive conversational system.
 
 > **Disclaimer:** This is a CS 6221 course project — not for production or clinical use.
 
@@ -68,60 +68,57 @@ claude mcp add --transport http --scope user context7 https://mcp.context7.com/m
 
 ```
 safehaven/
-├── controller/              # ChatController — orchestrates the pipeline
+├── controller/              # ChatController — orchestrates the SSP pipeline
 ├── llm/
 │   ├── claude_generator.py  # ResponseGenerator impl (Anthropic Claude)
 │   └── local_generator.py   # ResponseGenerator impl (Ollama, local)
-├── memory/                  # SQLite-backed conversation memory
+├── memory/
+│   ├── sqlite_memory.py     # ConversationMemory impl (SQLite — production)
+│   └── in_memory.py         # ConversationMemory impl (in-memory — testing)
 ├── safety/
 │   ├── emotion_detector.py  # EmotionDetector impl
-│   ├── risk_evaluator.py    # RiskEvaluator impl (keyword-based, active)
-│   ├── fsm_risk_evaluator.py # FSM RiskEvaluator (stub — not yet active)
-│   ├── language_detector.py # LanguageDetector (stub — not yet wired)
+│   ├── fsm_risk_evaluator.py # FSMRiskEvaluator — active, stateful, forward-only
+│   ├── language_detector.py # SimpleLanguageDetector — Arabic Unicode detection
+│   ├── risk_evaluator.py    # KeywordRiskEvaluator (kept for reference)
 │   └── output_filter.py     # OutputFilter impl
 ├── strategy/
-│   ├── base.py              # ConcreteStrategySelector (stub — not yet wired)
-│   ├── supportive.py        # SupportiveStrategy — CALM/CONCERNED (stub)
-│   ├── de_escalation.py     # DeEscalationStrategy — ELEVATED (stub)
-│   └── crisis.py            # CrisisStrategy — CRISIS (stub)
+│   ├── base.py              # ConcreteStrategySelector
+│   ├── supportive.py        # SupportiveStrategy — CALM/CONCERNED (MI/OARS)
+│   ├── de_escalation.py     # DeEscalationStrategy — ELEVATED (DBT/TIPP)
+│   └── crisis.py            # CrisisStrategy — CRISIS (QPR)
 ├── ui/
 │   ├── app.py               # Kivy App + ScreenManager
 │   ├── welcome_screen.py    # Splash/welcome screen
-│   ├── chat_screen.py       # Main chat interface
+│   ├── chat_screen.py       # Chat interface — FSM color bar, emotion bubbles
 │   ├── crisis_screen.py     # Crisis resources display
-│   ├── insights_screen.py   # Emotional trends dashboard (placeholder)
-│   └── theme.py             # Colors, emotion-to-color map
-├── tests/                   # pytest test suite
+│   ├── insights_screen.py   # Emotion dashboard (DashboardViewModel + Observer)
+│   └── theme.py             # Colors, emotion-to-color map, FSM risk colors
+├── tests/                   # pytest test suite (86 tests)
 ├── resources/
-│   ├── crisis_keywords.txt      # English crisis keywords
-│   ├── crisis_keywords_ar.txt   # Arabic crisis keywords
+│   ├── crisis_keywords.txt      # English crisis keywords (58 entries)
+│   ├── crisis_keywords_ar.txt   # Arabic crisis keywords (32 entries)
 │   ├── crisis_hotlines.json     # Country → hotline mapping
-│   ├── emotion_keywords_ar.json # Arabic emotion word sets
-│   └── safehaven.kv             # Unused Kivy DSL skeleton (UI is built in Python)
+│   └── emotion_keywords_ar.json # Arabic emotion word sets
 ├── logging_config.py        # Structured logging setup
 ├── interfaces.py            # Protocol definitions
 └── models.py                # Dataclass models
 ```
 
-## Pipeline
+## Pipeline (SSP — Stateful Safety Pipeline)
 
-**Current:**
 ```
-UI (Kivy) → EmotionDetector → KeywordRiskEvaluator → ResponseGenerator → OutputFilter → UI
+UI (Kivy) → LanguageDetector → EmotionDetector → FSMRiskEvaluator → StrategySelector → ResponseGenerator → OutputFilter → UI
 ```
 
-**Target (planned):**
-```
-UI (Kivy) → LanguageDetector → EmotionDetector → FSM RiskEvaluator → StrategySelector → ResponseGenerator → OutputFilter → UI
-```
+FSM states: `CALM → CONCERNED → ELEVATED → CRISIS` (forward-only, resets on `clear()`)
 
 ## Design Patterns
 
-| Pattern | Where | Status | Why |
-|---------|-------|--------|-----|
-| **Strategy** | `StrategySelector` picks `ResponseStrategy` by FSM state | Stub — not yet wired | Swap response behavior without changing controller |
-| **FSM** | `FSMRiskEvaluator` tracks escalation states | Stub — `KeywordRiskEvaluator` is active | Stateful risk assessment across conversation turns |
-| **Pipeline** | `ChatController.handle_message()` | Implemented (partial — no LanguageDetector/StrategySelector yet) | Each stage transforms data for the next |
-| **Observer** | UI ← Controller (callback on response) | Implemented | Decouples UI from business logic |
-| **Repository** | `ConversationMemory` | Implemented | Abstracts storage (SQLite today, anything tomorrow) |
-| **Dependency Injection** | Controller accepts Protocol-typed dependencies | Implemented | Easy testing with mocks, swappable implementations |
+| Pattern | Where | Status |
+|---------|-------|--------|
+| **Strategy** | `ConcreteStrategySelector` picks strategy by FSM state (MI / DBT / QPR) | Implemented |
+| **FSM** | `FSMRiskEvaluator` — forward-only ratchet across CALM→CONCERNED→ELEVATED→CRISIS | Implemented |
+| **Pipeline** | `ChatController.handle_message()` — 11-step SSP | Implemented |
+| **Observer** | `DashboardViewModel(EventDispatcher)` + UI ← Controller callback | Implemented |
+| **Repository** | `ConversationMemory` — two backends: SQLite + InMemory | Implemented |
+| **Dependency Injection** | Controller accepts Protocol-typed dependencies | Implemented |

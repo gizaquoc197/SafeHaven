@@ -10,42 +10,39 @@ SafeHaven is a safety-aware mental health chatbot (Python, Anthropic Claude API)
 
 ## Architecture
 
-**Current pipeline:** `UI (Kivy) → EmotionDetector → KeywordRiskEvaluator → ResponseGenerator → OutputFilter → UI`
+The architecture is named the **Stateful Safety Pipeline (SSP)** — use this name in docs and presentations.
 
-**Target pipeline (planned):** `UI (Kivy) → LanguageDetector → EmotionDetector → FSM RiskEvaluator → StrategySelector → ResponseGenerator → OutputFilter → UI`
-
-> LanguageDetector, FSMRiskEvaluator, and StrategySelector are stubbed but not yet wired into the controller.
+**Active pipeline:** `UI (Kivy) → LanguageDetector → EmotionDetector → FSMRiskEvaluator → StrategySelector → ResponseGenerator → OutputFilter → UI`
 
 `ChatController.handle_message` returns `None` on HIGH risk — UI must show crisis screen, not a text response.
 
-## FSM States (planned — not yet active)
+## FSM States
 
 `CALM → CONCERNED → ELEVATED → CRISIS`
 
 - **CALM**: Normal conversation, low risk signals
-- **CONCERNED**: Mild negative emotion detected, monitoring
-- **ELEVATED**: Sustained negative emotion or escalation pattern
-- **CRISIS**: Crisis keywords detected or rapid escalation
+- **CONCERNED**: First negative emotion detected (confidence > 0.6)
+- **ELEVATED**: 3+ consecutive negative emotion turns
+- **CRISIS**: FEARFUL emotion (confidence ≥ 0.9) — terminal state for the session
 
 Transitions are forward-only within a session (no backwards movement). Reset on `clear()`.
+`FSMRiskEvaluator` uses `_RANK` dict for monotonic enforcement — `_transition_to()` asserts `_RANK[new] >= _RANK[current]`.
 
-> FSM states are defined in `models.py` and `FSMRiskEvaluator` exists but raises `NotImplementedError`. The active evaluator is `KeywordRiskEvaluator` (stateless, keyword-based).
+## Strategy Pattern
 
-## Strategy Pattern (planned — not yet wired)
+Strategy is selected by FSM state via `ConcreteStrategySelector`:
 
-Strategy is selected by FSM state via `StrategySelector`:
+| FSM State | Strategy | Clinical Framework |
+|-----------|----------|--------------------|
+| CALM / CONCERNED | `SupportiveStrategy` | Motivational Interviewing (OARS) |
+| ELEVATED | `DeEscalationStrategy` | DBT Distress Tolerance (TIPP/5-4-3-2-1) |
+| CRISIS | `CrisisStrategy` | QPR (Question, Persuade, Refer) |
 
-| FSM State | Strategy | Behavior |
-|-----------|----------|----------|
-| CALM / CONCERNED | `SupportiveStrategy` | Warm, empathetic prompting |
-| ELEVATED | `DeEscalationStrategy` | Grounding, safety-aware prompting |
-| CRISIS | `CrisisStrategy` | Minimal LLM, directs to resources |
-
-> Strategies and `ConcreteStrategySelector` are defined but stubbed (`NotImplementedError`). `ChatController` does not yet call `StrategySelector` — no strategy-driven prompting occurs.
+Never instantiate strategies directly in the controller — always go through `StrategySelector`.
 
 ## Multilingual
 
-- `LanguageDetector` is stubbed (`NotImplementedError`) — not yet integrated into the pipeline
+- `SimpleLanguageDetector` is active — Arabic detected via Unicode ratio (U+0600–U+06FF chars > 30%)
 - Per-language keyword files: `crisis_keywords.txt` / `crisis_keywords_ar.txt`
 - Per-language emotion words: `emotion_keywords_ar.json`
 
@@ -66,5 +63,6 @@ Strategy is selected by FSM state via `StrategySelector`:
 
 - Never call the LLM directly from UI code — always go through `ChatController`
 - All crisis-related logic goes through `RiskEvaluator`, not ad-hoc keyword checks
-- Strategy selection will go through `StrategySelector`, not hardcoded if/else (not yet wired)
-- FSM will be stateful — lives for the session, reset on `clear()` (not yet active; `KeywordRiskEvaluator` is used)
+- Never instantiate strategies directly in the controller — always go through `StrategySelector`
+- FSM is stateful — lives for the session, reset on `clear()`. `FSMRiskEvaluator` is the active evaluator (`KeywordRiskEvaluator` is kept for reference but no longer wired)
+- `InMemoryConversationMemory` (`memory/in_memory.py`) is the second Repository backend — use it in tests instead of inline `FakeMemory`

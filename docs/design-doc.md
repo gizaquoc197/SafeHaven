@@ -9,7 +9,7 @@
 
 **SafeHaven** is a desktop chatbot that provides empathetic conversational support while actively monitoring for signs of emotional distress or crisis. It uses an API-based LLM (Anthropic Claude) for response generation, layered behind a safety pipeline that analyzes emotion, evaluates risk, and filters output.
 
-> **Current vs Target:** The architecture below describes the full target design. The current implementation uses a subset of this pipeline: `UI (Kivy) → EmotionDetector → KeywordRiskEvaluator → ResponseGenerator → OutputFilter → UI`. Components marked *(stub)* below are defined but raise `NotImplementedError`.
+> **Stateful Safety Pipeline (SSP):** The full SSP is now active. Pipeline: `UI (Kivy) → LanguageDetector → EmotionDetector → FSMRiskEvaluator → StrategySelector → ResponseGenerator → OutputFilter → UI`. All components are implemented and wired.
 
 ### Scope
 
@@ -114,11 +114,11 @@
 
 | Layer | Purpose | Key Rule | Status |
 |-------|---------|----------|--------|
-| **Presentation** | Renders UI, captures input | Never calls LLM directly | ✅ Implemented (Kivy, 4 screens) |
-| **Language Detection** | Identifies input language | Runs before emotion detection | ❌ Stub — `detect_language()` raises `NotImplementedError` |
+| **Presentation** | Renders UI, captures input | Never calls LLM directly | ✅ Implemented — Kivy, 4 screens; FSM color bar + emotion-colored bubbles |
+| **Language Detection** | Identifies input language | Runs before emotion detection | ✅ Implemented — `SimpleLanguageDetector` (Unicode Arabic ratio) |
 | **Processing** | Extracts emotion, stores messages | Stateless detection, stateful storage | ✅ Implemented |
-| **Decision** | Evaluates risk from UserState | Single source of risk truth | ⚠️ `KeywordRiskEvaluator` active; `FSMRiskEvaluator.evaluate()` stubbed |
-| **Strategy Selection** | Picks response strategy by FSM state | Decouples strategy from controller logic | ❌ Stub — `select()` raises `NotImplementedError`; not wired in controller |
+| **Decision** | Evaluates risk from UserState | Single source of risk truth | ✅ Implemented — `FSMRiskEvaluator` active; forward-only ratchet constraint |
+| **Strategy Selection** | Picks response strategy by FSM state | Decouples strategy from controller logic | ✅ Implemented — `ConcreteStrategySelector` + 3 strategies wired in controller |
 | **Generation** | Calls LLM API with strategy-built prompt | Only called if risk ≤ MEDIUM | ✅ Implemented (Claude + Ollama) |
 | **Validation** | Filters LLM output + strategy post-processing | Last gate before display | ✅ Implemented |
 
@@ -267,75 +267,29 @@ class StrategySelector(Protocol):
         ...
 ```
 
-### ChatController — Orchestrator
+### ChatController — Orchestrator (SSP)
 
-> **Note:** The code below reflects the current implementation. The target pipeline will add `LanguageDetector` and `StrategySelector` calls (see architecture diagram above).
+The controller implements the full 11-step Stateful Safety Pipeline:
 
 ```python
-class ChatController:
-    """Orchestrates the full message pipeline.
-
-    Owns no business logic — delegates to injected modules.
-    """
-
-    def __init__(
-        self,
-        detector: EmotionDetector,
-        evaluator: RiskEvaluator,
-        memory: ConversationMemory,
-        generator: ResponseGenerator,
-        output_filter: OutputFilter,
-    ) -> None:
-        self.detector = detector
-        self.evaluator = evaluator
-        self.memory = memory
-        self.generator = generator
-        self.output_filter = output_filter
-
-    def handle_message(self, user_text: str) -> str | None:
-        """Process one user message through the full pipeline.
-
-        Returns the assistant response, or None if crisis path activated.
-        """
-        # 1. Detect emotion
-        emotion = self.detector.detect(user_text)
-
-        # 2. Store user message
-        user_msg = Message(role="user", content=user_text, emotion=emotion.label)
-        self.memory.store_message(user_msg)
-
-        # 3. Build user state
-        state = UserState(
-            current_emotion=emotion,
-            risk_level=RiskLevel.LOW,
-            message_count=len(self.memory.get_recent_messages()),
-        )
-
-        # 4. Evaluate risk
-        risk = self.evaluator.evaluate(state)
-
-        # 5. Crisis path
-        if risk == RiskLevel.HIGH:
-            return None  # Signal UI to show crisis screen
-
-        # 6. Generate response
-        context = ConversationContext(
-            recent_messages=self.memory.get_recent_messages(),
-            user_state=state,
-        )
-        raw_response = self.generator.generate(context)
-
-        # 7. Filter output
-        safe_response = self.output_filter.validate(raw_response, risk)
-
-        # 8. Store assistant message
-        assistant_msg = Message(
-            role="assistant", content=safe_response, risk_level=risk
-        )
-        self.memory.store_message(assistant_msg)
-
-        return safe_response
+# handle_message() pipeline steps:
+# 1.  Detect language (SimpleLanguageDetector)
+# 2.  Detect emotion (KeywordEmotionDetector)
+# 3.  Store user message (with language + emotion)
+# 4.  Build UserState (escalation_history from memory)
+# 5.  Evaluate risk (FSMRiskEvaluator — stateful, forward-only)
+# 6.  Crisis path: return None → UI shows crisis screen
+# 7.  Select strategy (ConcreteStrategySelector by fsm_state)
+# 8.  Build system prompt (strategy.build_system_prompt())
+# 9.  Generate response (LLM with strategy system prompt)
+# 10. Filter output (SafeOutputFilter)
+# 11. Post-process (strategy.post_process()) → store + return
 ```
+
+Controller exposes:
+- `controller.fsm_state` → current FSM state string (for UI color bar)
+- `controller.last_emotion` → last detected emotion (for bubble color)
+- `controller.clear()` → resets memory + FSM for new session
 
 ---
 
@@ -353,11 +307,12 @@ safehaven/
 │   ├── welcome_screen.py        # Splash/welcome screen
 │   ├── chat_screen.py           # Main chat interface
 │   ├── crisis_screen.py         # Crisis resource display
-│   ├── insights_screen.py       # Emotional trends dashboard (placeholder)
+│   ├── insights_screen.py       # Emotional trends dashboard (DashboardViewModel + Observer)
 │   └── theme.py                 # Colors, emotion-to-color map
 ├── memory/
 │   ├── __init__.py
-│   ├── sqlite_memory.py         # ConversationMemory impl (SQLite)
+│   ├── sqlite_memory.py         # ConversationMemory impl (SQLite — production)
+│   ├── in_memory.py             # ConversationMemory impl (in-memory — testing)
 │   └── schema.sql               # CREATE TABLE statements
 ├── safety/
 │   ├── __init__.py
@@ -526,14 +481,14 @@ Frontend → InsightsScreen depends on `ConversationMemory` (already done) — n
 
 ## 7. Design Patterns Used
 
-| Pattern | Where | Status | Why |
-|---------|-------|--------|-----|
-| **Strategy** | `StrategySelector` picks `ResponseStrategy` by FSM state; strategies: `SupportiveStrategy`, `DeEscalationStrategy`, `CrisisStrategy` | ❌ Classes exist, all `build_system_prompt()` / `select()` raise `NotImplementedError`; not wired in controller | Swap response behavior (system prompt + post-processing) without changing controller logic |
-| **Finite State Machine** | `FSMRiskEvaluator` manages states: CALM → CONCERNED → ELEVATED → CRISIS | ❌ Class exists, `evaluate()` raises `NotImplementedError`; `KeywordRiskEvaluator` is the active evaluator | Stateful risk tracking across turns; forward-only transitions prevent premature de-escalation |
-| **Pipeline** | `ChatController.handle_message()` — EmotionDetector → RiskEvaluator → Generator → Filter | ⚠️ Implemented with partial pipeline (no LanguageDetector, no StrategySelector yet) | Each stage transforms data for the next; easy to insert/reorder |
-| **Observer** | UI ← Controller (callback on response) | ✅ Implemented | Decouples UI from business logic |
-| **Repository** | `ConversationMemory` backed by SQLite | ✅ Implemented | Abstracts storage (SQLite today, anything tomorrow) |
-| **Dependency Injection** | Controller accepts Protocol-typed dependencies | ✅ Implemented | Easy testing with mocks, swappable implementations |
+| Pattern | Where | Clinical Basis | Status |
+|---------|-------|----------------|--------|
+| **Strategy** | `ConcreteStrategySelector` picks `ResponseStrategy` by FSM state; strategies: `SupportiveStrategy`, `DeEscalationStrategy`, `CrisisStrategy` | MI (OARS) + DBT (TIPP/5-4-3-2-1) + QPR — each strategy grounded in clinical framework | ✅ Implemented + wired in controller |
+| **Finite State Machine** | `FSMRiskEvaluator` manages states: CALM → CONCERNED → ELEVATED → CRISIS; `_RANK` dict enforces monotonic (forward-only) constraint | Ratchet constraint — mirrors clinical escalation-to-crisis protocols | ✅ Implemented — active evaluator |
+| **Pipeline** | `ChatController.handle_message()` — 11-step SSP: Language → Emotion → Memory → State → Risk → Strategy → Prompt → LLM → Filter → PostProcess → Store | Layered safety analogous to clinical triage protocols | ✅ Full SSP implemented |
+| **Observer** | `DashboardViewModel(EventDispatcher)` properties drive `InsightsScreen` UI updates; UI ← Controller (callback on response) | — | ✅ Implemented (two observers: chat response + dashboard) |
+| **Repository** | `ConversationMemory` protocol — two backends: `SQLiteMemory` (production) + `InMemoryConversationMemory` (testing) | — | ✅ Implemented (two concrete backends) |
+| **Dependency Injection** | Controller accepts Protocol-typed dependencies; all modules swappable without changing orchestrator | — | ✅ Implemented — 86 tests use injected fakes |
 
 ### FSM State Diagram
 
