@@ -23,7 +23,8 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
-from safehaven.personas.config import PersonaConfig
+from safehaven.personas.config import ParticleType, PersonaConfig
+from safehaven.ui.ambient_particles import AmbientParticleWidget
 from safehaven.ui.theme import (
     BACKGROUND_COLOR,
     EMOTION_COLORS,
@@ -151,6 +152,7 @@ class ChatScreen(Screen):
         self._thinking_widget: BoxLayout | None = None
         self._user_bubble_color: str = _USER_BUBBLE_COLOR
         self._default_bot_bubble_color: str = _DEFAULT_BOT_BUBBLE_COLOR
+        self._particle_widget: AmbientParticleWidget | None = None
 
         with self.canvas.before:
             self._bg_color_inst = Color(0.98, 0.98, 0.98, 1.0)
@@ -300,10 +302,39 @@ class ChatScreen(Screen):
         self._user_bubble_color = persona.colors["bubble_user"]
         self._default_bot_bubble_color = persona.colors["bubble_bot"]
 
+        # Particle widget lifecycle
+        ptype = persona.particle_type
+        if ptype == ParticleType.NONE:
+            if self._particle_widget is not None:
+                self._particle_widget.stop()
+                self.remove_widget(self._particle_widget)
+                self._particle_widget = None
+        elif (
+            self._particle_widget is not None
+            and self._particle_widget.particle_type == ptype
+        ):
+            # Same type already present — just (re)start in case it was stopped.
+            self._particle_widget.start()
+        else:
+            if self._particle_widget is not None:
+                self._particle_widget.stop()
+                self.remove_widget(self._particle_widget)
+            pw = AmbientParticleWidget(particle_type=ptype, size_hint=(1, 1))
+            # Insert at the end of the children list so it is rendered first
+            # (behind the root BoxLayout and all message content).
+            self.add_widget(pw, index=len(self.children))
+            self._particle_widget = pw
+            self._particle_widget.start()
+
     def on_pre_enter(self, *_args: object) -> None:
         """Apply the active persona theme each time this screen is shown."""
         if self._controller is not None:
             self.apply_persona_theme(self._controller.active_persona)
+
+    def on_leave(self, *_args: object) -> None:
+        """Pause particle animation while the screen is not visible."""
+        if self._particle_widget is not None:
+            self._particle_widget.stop()
 
     def _on_new_chat(self, *_args: object) -> None:
         """Clear conversation history and reset FSM to CALM."""
