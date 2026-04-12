@@ -133,7 +133,6 @@ class InsightsScreen(Screen):
         self._memory: ConversationMemory | None = None
         self._controller: ChatController | None = None
         self._vm = DashboardViewModel()
-        self._log_lines: list[str] = []
 
         with self.canvas.before:
             Color(*_hex_to_rgba(DASHBOARD_BG))
@@ -237,44 +236,6 @@ class InsightsScreen(Screen):
         timeline_scroll.add_widget(self._timeline_row)
         root.add_widget(timeline_scroll)
 
-        # ── Observer log panel ───────────────────────────────────
-        root.add_widget(Label(
-            text="Observer Log",
-            font_size="13sp",
-            color=[0.7, 0.7, 0.7, 1],
-            size_hint_y=None,
-            height=22,
-            halign="left",
-        ))
-        log_scroll = ScrollView(size_hint=(1, None), height=90)
-        self._log_label = Label(
-            text="",
-            font_size="11sp",
-            color=[0.5, 0.9, 0.5, 1],
-            size_hint_y=None,
-            halign="left",
-            valign="top",
-        )
-        self._log_label.bind(
-            width=lambda inst, w: setattr(inst, "text_size", (w, None)),
-            texture_size=lambda inst, v: setattr(inst, "height", v[1] + 8),
-        )
-        log_scroll.add_widget(self._log_label)
-        root.add_widget(log_scroll)
-
-        # ── Simulate button ─────────────────────────────────────
-        sim_btn = Button(
-            text="Simulate SAD Message",
-            size_hint=(0.5, None),
-            height=38,
-            pos_hint={"center_x": 0.5},
-            font_size="13sp",
-            background_color=_hex_to_rgba("#7E57C2"),
-            color=[1, 1, 1, 1],
-        )
-        sim_btn.bind(on_release=self._simulate_message)
-        root.add_widget(sim_btn)
-
         root.add_widget(Widget())  # spacer
         self.add_widget(root)
 
@@ -289,7 +250,6 @@ class InsightsScreen(Screen):
     def set_memory(self, memory: ConversationMemory) -> None:
         """Inject the Repository and do an initial refresh."""
         self._memory = memory
-        self._add_log("[Repository] Memory injected — initial refresh")
         self._vm.refresh(memory)
 
     def set_controller(self, controller: ChatController) -> None:
@@ -300,12 +260,10 @@ class InsightsScreen(Screen):
         """Refresh dashboard every time the screen is navigated to."""
         if self._memory is not None:
             self._vm.refresh(self._memory)
-            self._add_log("[Observer] Screen entered — refreshed from repository")
         if self._controller is not None:
             live_state = self._controller.fsm_state
             self._card_risk.set_value(live_state)
             self._card_risk.set_color(RISK_COLORS.get(live_state, RISK_COLORS["calm"]))
-            self._add_log(f"[Observer] live FSM state: {live_state}")
 
     # ── ViewModel → UI bindings ─────────────────────────────────
 
@@ -322,14 +280,11 @@ class InsightsScreen(Screen):
             lbl = self._count_lbls.get(emotion.value)
             if lbl is not None:
                 lbl.text = str(counts.get(emotion.value, 0))
-        self._add_log(f"[Observer] emotion_counts updated: {counts}")
 
     def _on_current_risk(self, _inst: object, state: str) -> None:
         self._card_risk.set_value(state)
-        color = RISK_COLORS.get(state, RISK_COLORS["calm"])
         anim = Animation(size_hint_y=1.2, duration=0.1) + Animation(size_hint_y=1.0, duration=0.1)
         anim.start(self._card_risk)
-        self._add_log(f"[Observer] risk_level updated: {state}")
 
     def _on_risk_history(self, _inst: object, history: list[str]) -> None:
         user_turns = len([r for r in history if r in RISK_COLORS])
@@ -350,32 +305,6 @@ class InsightsScreen(Screen):
                 pos=lambda inst, v, r=rr: setattr(r, "pos", (v[0] + 1, v[1] + 1)),
             )
             self._timeline_row.add_widget(dot)
-
-    # ── Simulate ────────────────────────────────────────────────
-
-    def _simulate_message(self, *_: object) -> None:
-        if self._memory is None:
-            self._add_log("[Simulate] No memory injected — cannot simulate")
-            return
-        from datetime import datetime
-        from safehaven.models import EmotionLabel as EL, Message, RiskLevel
-        fake_msg = Message(
-            role="user",
-            content="[simulated] I've been feeling really sad and hopeless.",
-            emotion=EL.SAD,
-            risk_level=RiskLevel.MEDIUM,
-        )
-        self._memory.store_message(fake_msg)
-        self._vm.refresh(self._memory)
-        self._add_log("[Observer] Simulate triggered — SAD message injected")
-
-    # ── Log ─────────────────────────────────────────────────────
-
-    def _add_log(self, line: str) -> None:
-        self._log_lines.append(line)
-        if len(self._log_lines) > 20:
-            self._log_lines = self._log_lines[-20:]
-        self._log_label.text = "\n".join(self._log_lines)
 
     # ── Navigation ──────────────────────────────────────────────
 

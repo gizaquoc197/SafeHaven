@@ -18,6 +18,9 @@ from safehaven.models import (
     RiskLevel,
     UserState,
 )
+from safehaven.persona_decorator import PersonaDecorator
+from safehaven.personas import PERSONAS
+from safehaven.personas.config import PersonaConfig
 
 
 class ChatController:
@@ -45,6 +48,21 @@ class ChatController:
         self.language_detector = language_detector
         self.strategy_selector = strategy_selector
         self._last_emotion: EmotionLabel | None = None
+        self._active_persona: PersonaConfig = PERSONAS["default"]
+        self._persona_decorator: PersonaDecorator | None = None
+
+    @property
+    def active_persona(self) -> PersonaConfig:
+        """Active character persona — defaults to the passthrough "default" persona."""
+        return self._active_persona
+
+    @active_persona.setter
+    def active_persona(self, persona: PersonaConfig) -> None:
+        self._active_persona = persona
+        if persona.key != "default":
+            self._persona_decorator = PersonaDecorator(persona, self.generator)
+        else:
+            self._persona_decorator = None
 
     @property
     def fsm_state(self) -> str:
@@ -168,7 +186,18 @@ class ChatController:
             except Exception:
                 return "Sorry, I couldn't finalize the response safely. Please try again."
 
-        # 11. Store assistant message
+        # 11. Persona decoration (passthrough when default persona is active)
+        if self._persona_decorator is not None:
+            try:
+                safe_response = self._persona_decorator.wrap_response(
+                    raw_response=safe_response,
+                    emotion=emotion.label.value,
+                    risk_state=self.fsm_state,
+                )
+            except Exception:
+                pass  # fail-open — clinical response still returned
+
+        # 12. Store assistant message
         assistant_msg = Message(
             role="assistant", content=safe_response, risk_level=risk
         )

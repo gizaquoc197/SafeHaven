@@ -12,7 +12,7 @@ class CrisisStrategy:
     """Minimal LLM interaction — directs to crisis resources."""
 
     temperature: float = 0.2
-    max_tokens: int = 100
+    max_tokens: int = 250
 
     def build_system_prompt(self, context: ConversationContext) -> str:
         """Return a crisis system prompt grounded in QPR (Question, Persuade, Refer)."""
@@ -24,7 +24,7 @@ class CrisisStrategy:
 - Persuade: Express genuine care; give them a reason to reach out for help
 - Refer: Provide crisis resources clearly and immediately
 
-Use short sentences only. Total response: 50–100 words.
+Use short sentences only. Keep the response under 150 words but always complete your thought.
 Every response must include: 988 (Suicide & Crisis Lifeline) and Crisis Text Line (text HOME to 741741).
 Be direct, unambiguous, and compassionate — do not minimize or redirect away from safety.
 Ask whether they are safe right now and whether they have a trusted person nearby.

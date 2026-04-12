@@ -12,7 +12,7 @@ class DeEscalationStrategy:
     """Careful, grounding prompting for elevated-risk conversations."""
 
     temperature: float = 0.5
-    max_tokens: int = 150
+    max_tokens: int = 500
 
     def build_system_prompt(self, context: ConversationContext) -> str:
         """Return a de-escalation system prompt grounded in DBT Distress Tolerance."""
@@ -27,7 +27,7 @@ Grounding and stabilization tools to offer:
 
 Avoid "why" questions — they increase distress. Do not challenge or reframe.
 Structure each response: Acknowledge distress → Validate feelings → Offer one specific grounding exercise.
-Keep responses shorter and more concrete (100–150 words).
+Keep responses concrete and complete. Aim for 150–250 words; never cut off mid-exercise.
 Include the 988 Suicide & Crisis Lifeline in every response.
 
 {lang_instruction}"""

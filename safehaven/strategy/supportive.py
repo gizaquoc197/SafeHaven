@@ -12,7 +12,7 @@ class SupportiveStrategy:
     """Warm, empathetic prompting for low-risk conversations."""
 
     temperature: float = 0.75
-    max_tokens: int = 250
+    max_tokens: int = 600
 
     def build_system_prompt(self, context: ConversationContext) -> str:
         """Return a supportive system prompt grounded in Motivational Interviewing (OARS)."""
@@ -28,7 +28,7 @@ Use the OARS framework in every response:
 
 Tone: warm, curious, non-judgmental. Always validate feelings before offering any perspective.
 Ask only one open-ended question per response.
-Keep responses focused (150–250 words).
+Keep responses focused and complete. Aim for 150–300 words; never cut off mid-thought.
 Occasionally remind the user: if they ever feel unsafe, they can call or text 988.
 
 {lang_instruction}"""
