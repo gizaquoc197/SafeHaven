@@ -1,0 +1,173 @@
+@startuml SafeHaven handle_message() Sequence
+skinparam sequenceMessageAlign left
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 120
+
+title ChatController.handle_message() — Stateful Safety Pipeline (SSP, 12 steps)
+
+actor User
+participant "ChatScreen\n(UI)" as UI
+participant "ChatController" as CC
+participant "SimpleLanguage\nDetector" as LD
+participant "KeywordEmotion\nDetector" as ED
+participant "ConversationMemory\n(Repository)" as MEM
+participant "FSMRisk\nEvaluator" as FSM
+participant "ConcreteStrategy\nSelector" as SS
+participant "ResponseStrategy\n(Supportive/DeEscalation/Crisis)" as STRAT
+participant "ClaudeResponse\nGenerator" as GEN
+participant "SafeOutput\nFilter" as FILT
+participant "PersonaDecorator\n(Decorator)" as PD
+
+User -> UI : types message + presses Send
+activate UI
+
+UI -> UI : spawn background thread
+UI -> CC : handle_message(user_text)
+activate CC
+
+' ── Guard: empty input ────────────────────────────────────────────
+note over CC
+  Guard: if user_text.strip() == ""
+  → return "Please enter a message..."
+end note
+
+' ── Step 1: Language Detection ────────────────────────────────────
+CC -> LD : detect_language(user_text)
+activate LD
+LD --> CC : language ("en" | "ar")
+deactivate LD
+
+' ── Step 2: Emotion Detection ─────────────────────────────────────
+CC -> ED : detect(user_text)
+activate ED
+ED --> CC : EmotionResult(label, confidence)
+deactivate ED
+
+' ── Step 3: Load recent history (for FSM escalation_history) ──────
+CC -> MEM : get_recent_messages(limit=10)
+activate MEM
+MEM --> CC : list[Message]  ← history before current turn
+deactivate MEM
+
+' ── Step 4: Build UserState ───────────────────────────────────────
+note over CC : Build UserState(current_emotion, escalation_history\nfrom history, language, fsm_state)
+
+' ── Step 5: FSM Risk Evaluation ───────────────────────────────────
+CC -> FSM : evaluate(UserState)
+activate FSM
+note right of FSM
+  Monotonic ratchet:
+  CALM → CONCERNED → ELEVATED → CRISIS
+  assert _RANK[new] >= _RANK[current]
+end note
+FSM --> CC : RiskLevel (LOW / MEDIUM / HIGH)
+deactivate FSM
+
+' ── Step 6: Store user message WITH evaluated risk_level ──────────
+CC -> MEM : store_message(Message(role="user",\n  risk_level=evaluated_risk))
+activate MEM
+note right of MEM
+  Stored AFTER evaluation so risk_level
+  field is accurate. Insights timeline
+  reads this field to draw colour dots.
+end note
+MEM --> CC : None
+deactivate MEM
+
+' ── Step 7: Reload recent (now includes current user turn) ────────
+CC -> MEM : get_recent_messages(limit=10)
+activate MEM
+MEM --> CC : list[Message]  ← includes just-stored user turn
+deactivate MEM
+
+' ── Step 8: Crisis Path (HIGH risk early exit) ────────────────────
+alt RiskLevel == HIGH  [Crisis path]
+    CC --> UI : return None
+    UI -> UI : _hide_thinking()\nnavigate to CrisisScreen
+    UI --> User : shows crisis resources\n(988, Crisis Text Line)
+    note over CC, UI
+      LLM is NEVER called in this branch.
+      FSM state = "crisis" (terminal).
+    end note
+else RiskLevel <= MEDIUM  [Normal path]
+
+    ' ── Step 9: Strategy Selection + system prompt ───────────────
+    CC -> SS : select(risk, fsm_state)
+    activate SS
+    SS --> CC : ResponseStrategy instance
+    deactivate SS
+
+    CC -> STRAT : build_system_prompt(ConversationContext)
+    activate STRAT
+    note right of STRAT
+      Includes CRITICAL technique-label
+      suppression paragraph — LLM must
+      not echo OARS/DBT/QPR as headers.
+    end note
+    STRAT --> CC : system_prompt (MI / DBT / QPR text)
+    deactivate STRAT
+
+    ' ── Step 10: LLM Generation ──────────────────────────────────
+    CC -> GEN : generate(ConversationContext)
+    activate GEN
+    note right of GEN
+      Sends system_prompt + recent_messages
+      (including current user turn) to
+      Claude API with strategy temperature
+      and max_tokens.
+    end note
+    GEN --> CC : raw_response: str
+    deactivate GEN
+
+    ' ── Step 11: Output Filtering + post-processing ──────────────
+    CC -> FILT : validate(raw_response, risk)
+    activate FILT
+    note right of FILT
+      Strips dangerous patterns (dosages,
+      harm instructions).
+      MEDIUM: prepends empathetic prefix.
+    end note
+    FILT --> CC : safe_response: str
+    deactivate FILT
+
+    CC -> STRAT : post_process(safe_response)
+    activate STRAT
+    STRAT --> CC : final_response: str
+    deactivate STRAT
+
+    ' ── Step 12: Persona Decoration ──────────────────────────────
+    alt active_persona != "default"  [Persona active]
+        CC -> PD : wrap_response(final_response,\n  emotion, risk_state)
+        activate PD
+        note right of PD
+          2nd LLM call rewrites clinical
+          response in character voice.
+          crisis guard: prepend
+            crisis_break_message.
+          fail-open: if LLM throws →
+            return original response.
+        end note
+        PD -> GEN : generate(persona_context)
+        activate GEN
+        GEN --> PD : persona_response: str
+        deactivate GEN
+        PD --> CC : persona_response: str
+        deactivate PD
+    else active_persona == "default"  [Passthrough]
+        note over PD : Empty system_prompt →\nno 2nd LLM call
+    end
+
+    CC -> MEM : store_message(Message(role="assistant", ...))
+    activate MEM
+    MEM --> CC : None
+    deactivate MEM
+
+    CC --> UI : return final_response: str
+    UI --> User : display response in\nemotion-colored bubble
+    UI -> UI : _update_fsm_bar()\n(pulse animation on state change)
+
+end
+deactivate CC
+deactivate UI
+
+@enduml

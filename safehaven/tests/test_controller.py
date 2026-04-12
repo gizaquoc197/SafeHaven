@@ -291,6 +291,53 @@ class TestChatControllerWired:
         assert result == "Sorry, the response service timed out. Please try again."
         assert controller.fsm_state == "calm"
 
+    def test_cssrs_graduated_escalation_to_crisis(self) -> None:
+        """Five-turn C-SSRS-aligned sequence using the real emotion detector.
+
+        Mirrors the Columbia Suicide Severity Rating Scale escalating prompts
+        validated in Pichowicz et al. (Scientific Reports 2025).
+
+        Turn 1: Passive sadness → CONCERNED
+        Turns 2–3: Sustained low mood → ELEVATED
+        Turn 4: Still distressed (ELEVATED holds)
+        Turn 5: Crisis ideation → CRISIS (handle_message returns None)
+        """
+        from safehaven.safety.emotion_detector import KeywordEmotionDetector
+
+        generator = FakeGenerator("I hear you.")
+        controller = ChatController(
+            detector=KeywordEmotionDetector(),
+            evaluator=FSMRiskEvaluator(),
+            memory=InMemoryConversationMemory(),
+            generator=generator,
+            output_filter=FakeFilter(),
+            language_detector=SimpleLanguageDetector(),
+            strategy_selector=ConcreteStrategySelector(),
+        )
+
+        # Turn 1: passive sadness — 'down'/'sad' are SAD keywords → CONCERNED
+        result = controller.handle_message("I have been feeling really down and sad lately")
+        assert controller.fsm_state == "concerned"
+        assert result is not None
+
+        # Turn 2: continued hopelessness — 'hopeless'/'miserable' → counter=2
+        controller.handle_message("I feel hopeless and miserable right now")
+        assert controller.fsm_state in ("concerned", "elevated")
+
+        # Turn 3: sustained distress — 'crying'/'devastated' → counter=3 → ELEVATED
+        controller.handle_message("I am crying and feel devastated every day")
+        assert controller.fsm_state == "elevated"
+
+        # Turn 4: still distressed — 'lonely'/'unhappy' → FSM stays ELEVATED
+        result = controller.handle_message("I feel lonely and so unhappy")
+        assert controller.fsm_state == "elevated"
+        assert result is not None
+
+        # Turn 5: crisis ideation — 'end my life' is a crisis keyword → CRISIS
+        result = controller.handle_message("I want to end my life")
+        assert result is None  # crisis path activated
+        assert controller.fsm_state == "crisis"
+
     def test_i4_memory_write_failure_returns_user_friendly_error(self) -> None:
         controller = ChatController(
             detector=FakeDetector(EmotionLabel.NEUTRAL, 0.5),

@@ -59,6 +59,14 @@ Never instantiate strategies directly in the controller — always go through `S
 
 - **SQLite** (project, `.mcp.json`): queries `safehaven.db` — the conversation storage database
 
+## Screenshots
+
+Press **F12** while the app is running to capture a screenshot. Files are saved to:
+
+`frontend_screenshot_debug/safehaven_screenshot000N.png` (Kivy auto-increments the number)
+
+When asked to "look at the newest screenshot", glob `frontend_screenshot_debug/` for the highest-numbered file and read it.
+
 ## Gotchas
 
 - Never call the LLM directly from UI code — always go through `ChatController`

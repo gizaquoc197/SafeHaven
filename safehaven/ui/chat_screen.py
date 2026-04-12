@@ -1,17 +1,20 @@
 """Kivy chat screen — main conversation interface.
 
 Replaces ``chat_window.py`` (Tkinter). Includes message list, input box,
-send button, and emotion-colored message bubbles.
+send button, and emotion-colored message bubbles with left/right alignment.
 """
 
 from __future__ import annotations
 
+import re
 import threading
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from kivy.animation import Animation
 from kivy.clock import Clock
-from kivy.graphics import Color, Rectangle, RoundedRectangle
+from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
+from kivy.properties import ColorProperty
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
@@ -20,18 +23,23 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
+from safehaven.personas.config import ParticleType, PersonaConfig
+from safehaven.ui.ambient_particles import AmbientParticleWidget
+from safehaven.ui.persona_icons import CharacterAvatar
 from safehaven.ui.theme import (
     BACKGROUND_COLOR,
     EMOTION_COLORS,
     PRIMARY_COLOR,
     RISK_COLORS,
-    SURFACE_COLOR,
     TEXT_COLOR,
     TEXT_SECONDARY,
 )
 
 if TYPE_CHECKING:
     from safehaven.controller.chat_controller import ChatController
+
+_USER_BUBBLE_COLOR = "#E8EAF6"  # Material indigo-50 — default persona fallback
+_DEFAULT_BOT_BUBBLE_COLOR = "#E3F2FD"  # Material blue-50 — default persona fallback
 
 
 def _hex_to_rgba(hex_color: str) -> list[float]:
@@ -40,56 +48,155 @@ def _hex_to_rgba(hex_color: str) -> list[float]:
     return [int(h[i : i + 2], 16) / 255.0 for i in (0, 2, 4)] + [1.0]
 
 
+def _lighten(hex_color: str, amount: float = 0.82) -> list[float]:
+    """Blend hex_color toward white. amount=1.0 = pure white."""
+    rgba = _hex_to_rgba(hex_color)
+    return [c + (1.0 - c) * amount for c in rgba[:3]] + [1.0]
+
+
+def _escape_kivy(text: str) -> str:
+    """Escape square brackets so Kivy's markup parser treats them as literals."""
+    return text.replace("[", r"\[").replace("]", r"\]")
+
+
+def _md_to_kivy(text: str) -> str:
+    """Convert a subset of Markdown to Kivy markup tags."""
+    text = _escape_kivy(text)
+    # **bold**
+    text = re.sub(r"\*\*(.+?)\*\*", r"[b]\1[/b]", text, flags=re.DOTALL)
+    # *italic* (negative lookaround avoids matching on **)
+    text = re.sub(
+        r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"[i]\1[/i]", text, flags=re.DOTALL
+    )
+    # ### Header lines → bold
+    text = re.sub(r"^#{1,6}\s+(.+)$", r"[b]\1[/b]", text, flags=re.MULTILINE)
+    return text
+
+
+class _TypingDots(BoxLayout):
+    """Three animated dots shown while the LLM is generating a response."""
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(
+            orientation="horizontal",
+            size_hint=(None, None),
+            width=56,
+            height=30,
+            spacing=6,
+            **kwargs,
+        )
+        self._running = True
+        dim = _hex_to_rgba(TEXT_SECONDARY)
+        self._dots: list[Label] = []
+        for _ in range(3):
+            dot = Label(text="●", font_size="14sp", color=list(dim))
+            self.add_widget(dot)
+            self._dots.append(dot)
+        Clock.schedule_once(lambda _dt: self._pulse(0), 0.1)
+
+    def _pulse(self, idx: int) -> None:
+        if not self._running:
+            return
+        dot = self._dots[idx]
+        bright: list[float] = [1.0, 1.0, 1.0, 1.0]
+        dim = list(_hex_to_rgba(TEXT_SECONDARY))
+        anim = Animation(color=bright, duration=0.25) + Animation(
+            color=dim, duration=0.25
+        )
+        anim.bind(on_complete=lambda *_: self._pulse((idx + 1) % 3))
+        anim.start(dot)
+
+    def stop_animation(self) -> None:
+        self._running = False
+        Animation.cancel_all(self)
+
+
 class _MessageBubble(Label):
     """A single chat message with a colored background."""
 
-    def __init__(self, text: str, bg_color: str, **kwargs: object) -> None:
+    def __init__(
+        self,
+        text: str,
+        bg_color: str,
+        font_size: str = "14sp",
+        radius: int = 8,
+        accent_color: str | None = None,
+        **kwargs: object,
+    ) -> None:
         super().__init__(
             text=text,
             markup=True,
-            size_hint_y=None,
+            size_hint=(1, None),
             text_size=(None, None),
-            padding=(12, 8),
+            padding=(16, 8),    # extra left padding leaves room for the accent strip
             color=_hex_to_rgba(TEXT_COLOR),
-            font_size="14sp",
+            font_size=font_size,
             **kwargs,
         )
         self._bg_color = _hex_to_rgba(bg_color)
+        self._accent_rect: Rectangle | None = None
         with self.canvas.before:
             Color(*self._bg_color)
             self._bg_rect = RoundedRectangle(
-                size=self.size, pos=self.pos, radius=[8]
+                size=self.size, pos=self.pos, radius=[radius]
             )
+            if accent_color is not None:
+                Color(*_hex_to_rgba(accent_color))
+                self._accent_rect = Rectangle(
+                    pos=self.pos, size=(4, self.height)
+                )
         self.bind(size=self._update, pos=self._update, texture_size=self._update)
 
     def _update(self, *_args: object) -> None:
+        if self.width > 24:
+            self.text_size = (self.width - 24, None)
         if self.text_size[0] is not None:
             self.height = max(self.texture_size[1] + 20, 40)
         self._bg_rect.size = self.size
         self._bg_rect.pos = self.pos
+        if self._accent_rect is not None:
+            self._accent_rect.pos = self.pos
+            self._accent_rect.size = (4, self.height)
+
 
 class ChatScreen(Screen):
     """Main chat interface — message list, input box, send button."""
 
+    _bg_color_prop = ColorProperty([0.98, 0.98, 0.98, 1.0])
+
     def __init__(self, **kwargs: object) -> None:
         super().__init__(**kwargs)
         self._controller: ChatController | None = None
-
-        from kivy.graphics import Color as GColor
-        from kivy.graphics import Rectangle
+        self._thinking_widget: BoxLayout | None = None
+        self._user_bubble_color: str = _USER_BUBBLE_COLOR
+        self._default_bot_bubble_color: str = _DEFAULT_BOT_BUBBLE_COLOR
+        self._bubble_font_size: str = "14sp"
+        self._bubble_radius: int = 8
+        self._particle_widget: AmbientParticleWidget | None = None
+        self._conversation_started: bool = False
+        self._welcome_persona_key: str = ""
+        self._new_chat_btn: Button | None = None
+        self._insights_btn: Button | None = None
+        self._header_rect_ref: Rectangle | None = None
+        self._active_persona_key: str = "default"
+        self._bot_accent_color: str = "#FFC107"   # default persona accent
+        self._header_avatar: CharacterAvatar | None = None
 
         with self.canvas.before:
-            GColor(*_hex_to_rgba(BACKGROUND_COLOR))
+            self._bg_color_inst = Color(0.98, 0.98, 0.98, 1.0)
             self._bg_rect = Rectangle(size=self.size, pos=self.pos)
-        self.bind(size=self._update_bg, pos=self._update_bg)
+        self.bind(
+            size=self._update_bg,
+            pos=self._update_bg,
+            _bg_color_prop=self._apply_bg_color,
+        )
 
         root = BoxLayout(orientation="vertical", padding=0, spacing=0)
 
         # FSM risk-level indicator bar (height=6, colored by current FSM state)
-        self._state_bar = Widget(size_hint_y=None, height=6)
-        self._state_bar_color: list[float] = _hex_to_rgba(RISK_COLORS["calm"])
+        self._state_bar = Widget(size_hint_y=None, height=12)
         with self._state_bar.canvas:
-            self._state_bar_color_inst = Color(*self._state_bar_color)
+            self._state_bar_color_inst = Color(*_hex_to_rgba(RISK_COLORS["calm"]))
             self._state_bar_rect = Rectangle(
                 size=self._state_bar.size, pos=self._state_bar.pos
             )
@@ -97,6 +204,49 @@ class ChatScreen(Screen):
             size=self._update_state_bar, pos=self._update_state_bar
         )
         root.add_widget(self._state_bar)
+
+        # Header bar: title + New Chat button
+        header = BoxLayout(
+            orientation="horizontal",
+            size_hint_y=None,
+            height=40,
+            padding=(10, 4),
+            spacing=8,
+        )
+        with header.canvas.before:
+            self._header_bg_color_inst = Color(*_hex_to_rgba("#FFFFFF"))
+            self._header_rect = Rectangle(size=header.size, pos=header.pos)
+        header.bind(
+            size=lambda inst, v: setattr(self._header_rect, "size", v),
+            pos=lambda inst, v: setattr(self._header_rect, "pos", v),
+        )
+        self._header_avatar = CharacterAvatar(
+            size_hint=(None, None), size=(32, 32)
+        )
+        self._header_avatar.set_persona("default")
+        header.add_widget(self._header_avatar)
+
+        self._header_label = Label(
+            text="SafeHaven",
+            font_size="16sp",
+            bold=True,
+            color=_hex_to_rgba(PRIMARY_COLOR),
+            halign="left",
+            size_hint_x=1,
+        )
+        header.add_widget(self._header_label)
+        new_chat_btn = Button(
+            text="New Chat",
+            size_hint=(None, None),
+            size=(80, 28),
+            font_size="12sp",
+            background_color=_hex_to_rgba(PRIMARY_COLOR),
+            color=[1, 1, 1, 1],
+        )
+        new_chat_btn.bind(on_release=self._on_new_chat)
+        header.add_widget(new_chat_btn)
+        self._new_chat_btn = new_chat_btn
+        root.add_widget(header)
 
         inner = BoxLayout(orientation="vertical", padding=10, spacing=8)
 
@@ -141,11 +291,21 @@ class ChatScreen(Screen):
         self._send_btn.bind(on_release=self._on_send)
         input_row.add_widget(self._send_btn)
 
+        insights_btn = Button(
+            text="Insights",
+            size_hint_x=None,
+            width=80,
+            font_size="13sp",
+            background_color=_hex_to_rgba("#7E57C2"),
+            color=[1, 1, 1, 1],
+        )
+        insights_btn.bind(on_release=self._go_to_insights)
+        input_row.add_widget(insights_btn)
+        self._insights_btn = insights_btn
+
         inner.add_widget(input_row)
         root.add_widget(inner)
         self.add_widget(root)
-
-        self._thinking_label: Label | None = None
 
         # Welcome message
         self._append_system("Welcome to SafeHaven. How are you feeling today?")
@@ -154,6 +314,116 @@ class ChatScreen(Screen):
         """Inject the ChatController (Observer pattern)."""
         self._controller = controller
 
+    def apply_persona_theme(self, persona: PersonaConfig) -> None:
+        """Apply persona color palette and name to all themed UI surfaces.
+
+        Called from ``on_pre_enter`` each time the chat screen becomes active so
+        that switching personas between sessions is reflected immediately.
+        """
+        primary = persona.colors["primary"]
+        bg = persona.colors["background"]
+
+        # Screen background
+        self._bg_color_prop = _hex_to_rgba(bg)
+
+        # Header title: persona name + primary color
+        self._header_label.text = persona.name
+        self._header_label.color = _hex_to_rgba(primary)
+
+        # Send button
+        self._send_btn.background_color = _hex_to_rgba(primary)
+
+        # Header background matches persona background
+        self._header_bg_color_inst.rgba = _hex_to_rgba(bg)
+
+        # New Chat button uses persona secondary; Insights uses persona accent
+        if self._new_chat_btn is not None:
+            self._new_chat_btn.background_color = _hex_to_rgba(
+                persona.colors["secondary"]
+            )
+        if self._insights_btn is not None:
+            self._insights_btn.background_color = _hex_to_rgba(primary)
+
+        # Bubble colors and style for future messages
+        self._user_bubble_color = persona.colors["bubble_user"]
+        self._default_bot_bubble_color = persona.colors["bubble_bot"]
+        self._bubble_font_size = persona.bubble_style["font_size"]
+        self._bubble_radius = persona.bubble_style["radius"]
+
+        # Particle widget lifecycle
+        ptype = persona.particle_type
+        if ptype == ParticleType.NONE:
+            if self._particle_widget is not None:
+                self._particle_widget.stop()
+                self.remove_widget(self._particle_widget)
+                self._particle_widget = None
+        elif (
+            self._particle_widget is not None
+            and self._particle_widget.particle_type == ptype
+        ):
+            # Same type already present — just (re)start in case it was stopped.
+            self._particle_widget.start()
+        else:
+            if self._particle_widget is not None:
+                self._particle_widget.stop()
+                self.remove_widget(self._particle_widget)
+            pw = AmbientParticleWidget(particle_type=ptype, size_hint=(1, 1))
+            # Insert at the end of the children list so it is rendered first
+            # (behind the root BoxLayout and all message content).
+            self.add_widget(pw, index=len(self.children))
+            self._particle_widget = pw
+            self._particle_widget.start()
+
+        # Track persona key + accent colour used when rendering bot messages
+        self._active_persona_key = persona.key
+        self._bot_accent_color = persona.colors["accent"]
+
+        # Header avatar — switches icon to match the active persona
+        if self._header_avatar is not None:
+            self._header_avatar.set_persona(persona.key)
+
+        # Themed input bar: persona-specific hint text and cursor colour
+        _HINT_TEXT: dict[str, str] = {
+            "default": "Type a message\u2026",
+            "iroh":    "Share your thoughts over tea\u2026",
+            "baymax":  "Describe what you are experiencing\u2026",
+            "naruto":  "Tell me what's going on!",
+        }
+        self._text_input.hint_text = _HINT_TEXT.get(persona.key, "Type a message\u2026")
+        self._text_input.cursor_color = _hex_to_rgba(primary)
+
+    def on_pre_enter(self, *_args: object) -> None:
+        """Apply the active persona theme each time this screen is shown."""
+        if self._controller is None:
+            return
+        persona = self._controller.active_persona
+        self.apply_persona_theme(persona)
+        # Replace welcome message when a new persona is selected and no real
+        # conversation has started yet.
+        if not self._conversation_started and persona.key != self._welcome_persona_key:
+            self._message_list.clear_widgets()
+            welcome = persona.welcome_message or "Welcome to SafeHaven. How are you feeling today?"
+            self._append_system(welcome)
+            self._welcome_persona_key = persona.key
+            Clock.schedule_once(lambda _dt: setattr(self._scroll, "scroll_y", 1), 0.1)
+
+    def on_leave(self, *_args: object) -> None:
+        """Pause particle animation while the screen is not visible."""
+        if self._particle_widget is not None:
+            self._particle_widget.stop()
+
+    def _on_new_chat(self, *_args: object) -> None:
+        """Clear conversation and navigate to persona selection for a fresh session."""
+        if self._controller is not None:
+            self._controller.clear()
+        self._message_list.clear_widgets()
+        self._conversation_started = False
+        self._welcome_persona_key = ""
+        Animation.cancel_all(self)
+        self._bg_color_prop = [0.98, 0.98, 0.98, 1.0]
+        if self.manager is not None:
+            self.manager.current = "persona"
+
     # ── Interaction ────────────────────────────────────────────
 
     def _on_send(self, *_args: object) -> None:
@@ -161,8 +431,9 @@ class ChatScreen(Screen):
         if not text or self._controller is None:
             return
 
+        self._conversation_started = True
         self._text_input.text = ""
-        self._append_message("You", text, SURFACE_COLOR)
+        self._append_message("You", text, self._user_bubble_color, is_user=True)
         self._set_input_enabled(False)
         self._show_thinking()
 
@@ -187,24 +458,35 @@ class ChatScreen(Screen):
     def _on_response(self, text: str) -> None:
         self._hide_thinking()
 
-        # Pick bubble color from detected emotion
-        bubble_color = "#E3F2FD"
-        if self._controller is not None and self._controller.last_emotion is not None:
+        bubble_color = self._default_bot_bubble_color
+        if (
+            self._controller is not None
+            and self._controller.last_emotion is not None
+            and self._controller.active_persona.key == "default"
+        ):
             bubble_color = EMOTION_COLORS.get(
-                self._controller.last_emotion, "#E3F2FD"
+                self._controller.last_emotion, self._default_bot_bubble_color
             )
 
-        self._append_message("SafeHaven", text, bubble_color)
+        sender = (
+            self._controller.active_persona.name
+            if self._controller is not None
+            else "SafeHaven"
+        )
+        self._append_message(sender, text, bubble_color, is_user=False)
         self._update_fsm_bar()
+        self._update_mood_background()
         self._set_input_enabled(True)
         self._text_input.focus = True
 
     def _on_error(self, msg: str) -> None:
+        self._hide_thinking()
         self._append_system(f"[Error: {msg}]")
         self._set_input_enabled(True)
         self._text_input.focus = True
 
     def _show_crisis_screen(self) -> None:
+        self._hide_thinking()
         if self.manager is not None:
             self.manager.current = "crisis"
 
@@ -215,15 +497,41 @@ class ChatScreen(Screen):
 
     # ── Display helpers ────────────────────────────────────────
 
-    def _append_message(self, sender: str, text: str, bg_color: str) -> None:
+    def _append_message(
+        self, sender: str, text: str, bg_color: str, *, is_user: bool = False
+    ) -> None:
+        ts = datetime.now().strftime("%H:%M")
+        display = _escape_kivy(text) if is_user else _md_to_kivy(text)
         bubble = _MessageBubble(
-            text=f"[b]{sender}:[/b] {text}", bg_color=bg_color
+            text=f"[b]{sender}[/b]  [size=11][color=888888]{ts}[/color][/size]\n{display}",
+            bg_color=bg_color,
+            font_size=self._bubble_font_size,
+            radius=self._bubble_radius,
+            size_hint_x=0.70 if is_user else 0.75,
+            size_hint_min_x=200,
+            accent_color=None if is_user else self._bot_accent_color,
         )
-        # Set text_size after widget is added so it wraps properly
-        bubble.bind(
-            width=lambda inst, w: setattr(inst, "text_size", (w - 24, None))
-        )
-        self._message_list.add_widget(bubble)
+
+        row = BoxLayout(size_hint_y=None, height=40, orientation="horizontal")
+        bubble.bind(height=row.setter("height"))
+        if is_user:
+            row.add_widget(Widget(size_hint_x=0.30))
+            row.add_widget(bubble)
+        else:
+            # 40 px avatar, top-aligned via a vertical wrapper
+            av = CharacterAvatar(size_hint=(None, None), size=(40, 40))
+            av.set_persona(self._active_persona_key)
+            av_wrap = BoxLayout(
+                orientation="vertical", size_hint=(None, 1), width=44
+            )
+            av_wrap.add_widget(av)        # first child → top of the wrapper
+            av_wrap.add_widget(Widget())  # spacer fills the rest below
+
+            row.add_widget(av_wrap)
+            row.add_widget(bubble)
+            row.add_widget(Widget(size_hint_x=0.25))
+
+        self._message_list.add_widget(row)
         Clock.schedule_once(lambda _dt: self._scroll_to_bottom(), 0.05)
 
     def _append_system(self, text: str) -> None:
@@ -238,6 +546,48 @@ class ChatScreen(Screen):
         lbl.bind(width=lambda inst, w: setattr(inst, "text_size", (w, None)))
         self._message_list.add_widget(lbl)
 
+    def _show_thinking(self) -> None:
+        dots = _TypingDots()
+
+        hint = "SafeHaven is thinking\u2026"
+        hint_color = _hex_to_rgba(PRIMARY_COLOR)
+        if self._controller is not None:
+            persona = self._controller.active_persona
+            if persona.typing_hint:
+                hint = persona.typing_hint
+            hint_color = _hex_to_rgba(persona.colors["primary"])
+
+        hint_lbl = Label(
+            text=f"[i]{hint}[/i]",
+            markup=True,
+            font_size="12sp",
+            color=hint_color,
+            size_hint_x=1,
+            size_hint_y=None,
+            height=30,
+            halign="left",
+            valign="middle",
+        )
+        hint_lbl.bind(width=lambda inst, w: setattr(inst, "text_size", (w, None)))
+
+        row = BoxLayout(
+            size_hint_y=None, height=30, orientation="horizontal", spacing=4
+        )
+        row.add_widget(dots)
+        row.add_widget(hint_lbl)
+        row._dots_ref = dots
+        self._thinking_widget = row
+        self._message_list.add_widget(row)
+        Clock.schedule_once(lambda _dt: self._scroll_to_bottom(), 0.05)
+
+    def _hide_thinking(self) -> None:
+        if self._thinking_widget is not None:
+            dots_ref = getattr(self._thinking_widget, "_dots_ref", None)
+            if dots_ref is not None:
+                dots_ref.stop_animation()
+            self._message_list.remove_widget(self._thinking_widget)
+            self._thinking_widget = None
+
     def _scroll_to_bottom(self) -> None:
         self._scroll.scroll_y = 0
 
@@ -245,9 +595,31 @@ class ChatScreen(Screen):
         self._text_input.disabled = not enabled
         self._send_btn.disabled = not enabled
 
+    # ── Background ─────────────────────────────────────────────
+
     def _update_bg(self, *_args: object) -> None:
         self._bg_rect.size = self.size
         self._bg_rect.pos = self.pos
+
+    def _apply_bg_color(self, _inst: object, value: list[float]) -> None:
+        self._bg_color_inst.rgba = value
+
+    def _update_mood_background(self) -> None:
+        """Animate the background toward a lightened tint of the detected emotion.
+
+        Only applies to the default persona — named personas keep their fixed
+        background color so their palette isn't washed out by emotion tints.
+        """
+        if self._controller is None or self._controller.last_emotion is None:
+            return
+        if self._controller.active_persona.key != "default":
+            return
+        target_hex = EMOTION_COLORS.get(self._controller.last_emotion, BACKGROUND_COLOR)
+        Animation(
+            _bg_color_prop=_lighten(target_hex), duration=2.5, t="in_out_sine"
+        ).start(self)
+
+    # ── FSM bar ────────────────────────────────────────────────
 
     def _update_state_bar(self, *_args: object) -> None:
         self._state_bar_rect.size = self._state_bar.size
@@ -261,25 +633,11 @@ class ChatScreen(Screen):
         color = _hex_to_rgba(RISK_COLORS.get(fsm_state, RISK_COLORS["calm"]))
         self._state_bar_color_inst.rgba = color
         self._state_bar_rect.size = self._state_bar.size
-        # Brief animation pulse: shrink height then restore
-        anim = Animation(height=2, duration=0.15) + Animation(height=6, duration=0.15)
+        anim = Animation(height=4, duration=0.15) + Animation(height=12, duration=0.15)
         anim.start(self._state_bar)
 
-    def _show_thinking(self) -> None:
-        lbl = Label(
-            text="SafeHaven is thinking…",
-            font_size="13sp",
-            color=_hex_to_rgba(TEXT_SECONDARY),
-            size_hint_y=None,
-            height=30,
-            halign="center",
-        )
-        lbl.bind(width=lambda inst, w: setattr(inst, "text_size", (w, None)))
-        self._thinking_label = lbl
-        self._message_list.add_widget(lbl)
-        Clock.schedule_once(lambda _dt: self._scroll_to_bottom(), 0.05)
+    # ── Navigation ─────────────────────────────────────────────
 
-    def _hide_thinking(self) -> None:
-        if self._thinking_label is not None:
-            self._message_list.remove_widget(self._thinking_label)
-            self._thinking_label = None
+    def _go_to_insights(self, *_args: object) -> None:
+        if self.manager is not None:
+            self.manager.current = "insights"

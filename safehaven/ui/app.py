@@ -9,11 +9,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from kivy.app import App
+from kivy.core.window import Window
 from kivy.uix.screenmanager import ScreenManager
 
 from safehaven.ui.chat_screen import ChatScreen
 from safehaven.ui.crisis_screen import CrisisScreen
 from safehaven.ui.insights_screen import InsightsScreen
+from safehaven.ui.persona_screen import PersonaScreen
 from safehaven.ui.welcome_screen import WelcomeScreen
 
 if TYPE_CHECKING:
@@ -30,8 +32,10 @@ class SafeHavenApp(App):
     def build(self) -> ScreenManager:
         """Create the ScreenManager and register all screens."""
         self.title = "SafeHaven — Mental Health Chatbot"
+        Window.bind(on_key_down=self._on_key_down)
         sm = ScreenManager()
         sm.add_widget(WelcomeScreen(name="welcome"))
+        sm.add_widget(PersonaScreen(name="persona"))
         sm.add_widget(ChatScreen(name="chat"))
         sm.add_widget(CrisisScreen(name="crisis"))
         sm.add_widget(InsightsScreen(name="insights"))
@@ -52,9 +56,18 @@ class SafeHavenApp(App):
         if hasattr(self, "_screen_manager"):
             self._apply_controller(controller)
 
+    def _on_key_down(self, _window: object, key: int, *_args: object) -> None:
+        if key == 293:  # F12
+            path = Window.screenshot(name="frontend_screenshot_debug/safehaven_screenshot.png")
+            print(f"Screenshot saved: {path}")
+
     def _apply_controller(self, controller: ChatController) -> None:
-        """Wire controller into ChatScreen and memory into InsightsScreen."""
+        """Wire controller into PersonaScreen, ChatScreen, and InsightsScreen."""
         sm = self._screen_manager
+
+        persona_screen = sm.get_screen("persona")
+        assert isinstance(persona_screen, PersonaScreen)
+        persona_screen.set_controller(controller)
 
         chat_screen = sm.get_screen("chat")
         assert isinstance(chat_screen, ChatScreen)
@@ -63,3 +76,4 @@ class SafeHavenApp(App):
         insights_screen = sm.get_screen("insights")
         assert isinstance(insights_screen, InsightsScreen)
         insights_screen.set_memory(controller.memory)
+        insights_screen.set_controller(controller)

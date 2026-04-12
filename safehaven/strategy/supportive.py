@@ -11,6 +11,9 @@ from safehaven.models import ConversationContext
 class SupportiveStrategy:
     """Warm, empathetic prompting for low-risk conversations."""
 
+    temperature: float = 0.75
+    max_tokens: int = 600
+
     def build_system_prompt(self, context: ConversationContext) -> str:
         """Return a supportive system prompt grounded in Motivational Interviewing (OARS)."""
         lang = context.user_state.language
@@ -25,8 +28,9 @@ Use the OARS framework in every response:
 
 Tone: warm, curious, non-judgmental. Always validate feelings before offering any perspective.
 Ask only one open-ended question per response.
-Keep responses focused (150–250 words).
-Occasionally remind the user: if they ever feel unsafe, they can call or text 988.
+Keep responses focused and complete. Aim for 150–300 words; never cut off mid-thought.
+
+CRITICAL: Never label, name, or identify the therapeutic techniques you are using. Do not write "Reflective listening:", "Affirmation:", "Open-ended question:", "CBT:", "OARS:", "TIPP:", "DBT:", "QPR:", or any technique name as a visible label. Integrate all techniques seamlessly into natural conversational language. The user should feel heard, not analyzed.
 
 {lang_instruction}"""
 

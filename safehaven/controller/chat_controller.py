@@ -18,6 +18,9 @@ from safehaven.models import (
     RiskLevel,
     UserState,
 )
+from safehaven.persona_decorator import PersonaDecorator
+from safehaven.personas import PERSONAS
+from safehaven.personas.config import PersonaConfig
 
 
 class ChatController:
@@ -45,6 +48,21 @@ class ChatController:
         self.language_detector = language_detector
         self.strategy_selector = strategy_selector
         self._last_emotion: EmotionLabel | None = None
+        self._active_persona: PersonaConfig = PERSONAS["default"]
+        self._persona_decorator: PersonaDecorator | None = None
+
+    @property
+    def active_persona(self) -> PersonaConfig:
+        """Active character persona — defaults to the passthrough "default" persona."""
+        return self._active_persona
+
+    @active_persona.setter
+    def active_persona(self, persona: PersonaConfig) -> None:
+        self._active_persona = persona
+        if persona.key != "default":
+            self._persona_decorator = PersonaDecorator(persona, self.generator)
+        else:
+            self._persona_decorator = None
 
     @property
     def fsm_state(self) -> str:
@@ -83,16 +101,7 @@ class ChatController:
             return "Sorry, I couldn't analyze that message. Please try again."
         self._last_emotion = emotion.label
 
-        # 3. Store user message
-        user_msg = Message(
-            role="user", content=user_text, emotion=emotion.label, language=language
-        )
-        try:
-            self.memory.store_message(user_msg)
-        except Exception:
-            return "Sorry, I'm having trouble saving this conversation right now. Please try again."
-
-        # 4. Build user state (include escalation history from memory)
+        # 3. Build user state (load history before storing current message)
         try:
             recent = self.memory.get_recent_messages()
         except Exception:
@@ -109,11 +118,27 @@ class ChatController:
             fsm_state=self.fsm_state,
         )
 
-        # 5. Evaluate risk
+        # 4. Evaluate risk
         try:
             risk = self.evaluator.evaluate(state)
         except Exception:
             return "Sorry, I couldn't evaluate that message safely. Please try again."
+
+        # 5. Store user message with the evaluated risk level
+        user_msg = Message(
+            role="user", content=user_text, emotion=emotion.label,
+            language=language, risk_level=risk,
+        )
+        try:
+            self.memory.store_message(user_msg)
+        except Exception:
+            return "Sorry, I'm having trouble saving this conversation right now. Please try again."
+
+        # Reload recent so the LLM context includes the just-stored user message
+        try:
+            recent = self.memory.get_recent_messages()
+        except Exception:
+            return "Sorry, I'm having trouble loading the conversation history right now. Please try again."
 
         # 6. Crisis path
         if risk == RiskLevel.HIGH:
@@ -122,6 +147,8 @@ class ChatController:
         # 7. Select strategy and build system prompt
         system_prompt = ""
         strategy_name = ""
+        strategy_temperature: float = 0.7
+        strategy_max_tokens: int = 1024
         if self.strategy_selector is not None:
             try:
                 strategy = self.strategy_selector.select(risk, self.fsm_state)
@@ -131,6 +158,8 @@ class ChatController:
                     user_state=state,
                 )
                 system_prompt = strategy.build_system_prompt(context_for_prompt)
+                strategy_temperature = strategy.temperature
+                strategy_max_tokens = strategy.max_tokens
             except Exception:
                 return "Sorry, I couldn't prepare a safe response strategy. Please try again."
 
@@ -140,6 +169,8 @@ class ChatController:
             user_state=state,
             system_prompt=system_prompt,
             strategy_name=strategy_name,
+            temperature=strategy_temperature,
+            max_tokens=strategy_max_tokens,
         )
         try:
             raw_response = self.generator.generate(context)
@@ -162,7 +193,18 @@ class ChatController:
             except Exception:
                 return "Sorry, I couldn't finalize the response safely. Please try again."
 
-        # 11. Store assistant message
+        # 11. Persona decoration (passthrough when default persona is active)
+        if self._persona_decorator is not None:
+            try:
+                safe_response = self._persona_decorator.wrap_response(
+                    raw_response=safe_response,
+                    emotion=emotion.label.value,
+                    risk_state=self.fsm_state,
+                )
+            except Exception:
+                pass  # fail-open — clinical response still returned
+
+        # 12. Store assistant message
         assistant_msg = Message(
             role="assistant", content=safe_response, risk_level=risk
         )

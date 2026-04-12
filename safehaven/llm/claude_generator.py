@@ -32,7 +32,8 @@ class ClaudeResponseGenerator:
 
         kwargs: dict[str, Any] = {
             "model": self._model,
-            "max_tokens": 1024,
+            "max_tokens": context.max_tokens,
+            "temperature": context.temperature,
             "messages": messages,
         }
         if context.system_prompt:
