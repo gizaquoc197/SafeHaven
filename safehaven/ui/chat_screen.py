@@ -486,6 +486,7 @@ class ChatScreen(Screen):
         self._text_input.focus = True
 
     def _show_crisis_screen(self) -> None:
+        self._hide_thinking()
         if self.manager is not None:
             self.manager.current = "crisis"
 

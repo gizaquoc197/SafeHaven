@@ -9,7 +9,7 @@
 
 **SafeHaven** is a desktop chatbot that provides empathetic conversational support while actively monitoring for signs of emotional distress or crisis. It uses an API-based LLM (Anthropic Claude) for response generation, layered behind a safety pipeline that analyzes emotion, evaluates risk, and filters output.
 
-> **Stateful Safety Pipeline (SSP):** The full SSP is now active. Pipeline: `UI (Kivy) → LanguageDetector → EmotionDetector → FSMRiskEvaluator → StrategySelector → ResponseGenerator → OutputFilter → UI`. All components are implemented and wired.
+> **Stateful Safety Pipeline (SSP):** The full SSP is now active. Pipeline: `UI (Kivy) → LanguageDetector → EmotionDetector → FSMRiskEvaluator → StrategySelector → ResponseGenerator → OutputFilter → PersonaDecorator → UI`. All components are implemented and wired.
 
 ### Scope
 
@@ -105,6 +105,14 @@
                        │ safe response
                        ▼
 ┌─────────────────────────────────────────────────────┐
+│                PERSONA DECORATION                    │
+│   PersonaDecorator.wrap_response()                   │
+│   (2nd LLM call rewrites in character voice;         │
+│    passthrough when default persona is active)       │
+└──────────────────────┬──────────────────────────────┘
+                       │ final response
+                       ▼
+┌─────────────────────────────────────────────────────┐
 │                   PRESENTATION                       │
 │   Display response in chat (emotion-colored bubble)  │
 └─────────────────────────────────────────────────────┘
@@ -120,7 +128,8 @@
 | **Decision** | Evaluates risk from UserState | Single source of risk truth | ✅ Implemented — `FSMRiskEvaluator` active; forward-only ratchet constraint |
 | **Strategy Selection** | Picks response strategy by FSM state | Decouples strategy from controller logic | ✅ Implemented — `ConcreteStrategySelector` + 3 strategies wired in controller |
 | **Generation** | Calls LLM API with strategy-built prompt | Only called if risk ≤ MEDIUM | ✅ Implemented (Claude + Ollama) |
-| **Validation** | Filters LLM output + strategy post-processing | Last gate before display | ✅ Implemented |
+| **Validation** | Filters LLM output + strategy post-processing | Runs before persona decoration | ✅ Implemented |
+| **Persona Decoration** | Rewrites clinical response in character voice via 2nd LLM call | Passthrough for default persona; fail-open on error | ✅ Implemented — 4 personas (default, iroh, baymax, naruto) |
 
 ---
 
@@ -275,15 +284,17 @@ The controller implements the full 11-step Stateful Safety Pipeline:
 # handle_message() pipeline steps:
 # 1.  Detect language (SimpleLanguageDetector)
 # 2.  Detect emotion (KeywordEmotionDetector)
-# 3.  Store user message (with language + emotion)
-# 4.  Build UserState (escalation_history from memory)
+# 3.  Load recent history for FSM escalation_history (before storing current message)
+# 4.  Build UserState
 # 5.  Evaluate risk (FSMRiskEvaluator — stateful, forward-only)
-# 6.  Crisis path: return None → UI shows crisis screen
-# 7.  Select strategy (ConcreteStrategySelector by fsm_state)
-# 8.  Build system prompt (strategy.build_system_prompt())
-# 9.  Generate response (LLM with strategy system prompt)
-# 10. Filter output (SafeOutputFilter)
-# 11. Post-process (strategy.post_process()) → store + return
+# 6.  Store user message with evaluated risk_level (drives Insights timeline)
+# 7.  Reload recent messages so LLM context includes current user turn
+# 8.  Crisis path: return None → UI shows crisis screen
+# 9.  Select strategy + build system prompt (ConcreteStrategySelector by fsm_state)
+# 10. Generate response (LLM with strategy system prompt)
+# 11. Filter output (SafeOutputFilter) + strategy.post_process()
+# 12. Persona decoration (PersonaDecorator — passthrough for default persona)
+#     → store assistant message + return
 ```
 
 Controller exposes:
@@ -331,20 +342,31 @@ safehaven/
 │   ├── supportive.py            # SupportiveStrategy (CALM/CONCERNED)
 │   ├── de_escalation.py         # DeEscalationStrategy (ELEVATED)
 │   └── crisis.py                # CrisisStrategy (CRISIS)
+├── personas/
+│   ├── __init__.py              # PERSONAS registry dict
+│   ├── config.py                # PersonaConfig dataclass + ParticleType enum
+│   ├── default.py               # Passthrough persona (empty system_prompt)
+│   ├── iroh.py                  # Uncle Iroh persona (Avatar: The Last Airbender)
+│   ├── baymax.py                # Baymax persona (Big Hero 6)
+│   └── naruto.py                # Naruto persona (Naruto)
+├── persona_decorator.py         # PersonaDecorator — 2nd LLM call for character voice
 ├── controller/
 │   ├── __init__.py
-│   └── chat_controller.py       # ChatController (orchestrator)
+│   └── chat_controller.py       # ChatController (orchestrator — 12-step SSP)
 ├── tests/
 │   ├── __init__.py
 │   ├── test_emotion.py
 │   ├── test_risk.py
 │   ├── test_filter.py
 │   ├── test_memory.py
-│   ├── test_controller.py       # Integration test with stubs
+│   ├── test_controller.py       # Integration tests with stubs
 │   ├── test_fsm.py              # FSM transition tests
+│   ├── test_fsm_hypothesis.py   # Property-based FSM tests (Hypothesis)
 │   ├── test_strategy.py         # Strategy pattern tests
 │   ├── test_language.py         # Language detection tests
-│   └── test_local_generator.py  # Local model tests
+│   ├── test_persona_decorator.py # PersonaDecorator unit tests
+│   ├── test_local_generator.py  # Local model tests
+│   └── test_final.py            # Sprint integration tests (prompt eng + Insights fix)
 ├── resources/
 │   ├── crisis_hotlines.json     # Country → hotline mapping
 │   ├── crisis_keywords.txt      # English crisis keywords
@@ -488,7 +510,8 @@ Frontend → InsightsScreen depends on `ConversationMemory` (already done) — n
 | **Pipeline** | `ChatController.handle_message()` — 11-step SSP: Language → Emotion → Memory → State → Risk → Strategy → Prompt → LLM → Filter → PostProcess → Store | Layered safety analogous to clinical triage protocols | ✅ Full SSP implemented |
 | **Observer** | `DashboardViewModel(EventDispatcher)` properties drive `InsightsScreen` UI updates; UI ← Controller (callback on response) | — | ✅ Implemented (two observers: chat response + dashboard) |
 | **Repository** | `ConversationMemory` protocol — two backends: `SQLiteMemory` (production) + `InMemoryConversationMemory` (testing) | — | ✅ Implemented (two concrete backends) |
-| **Dependency Injection** | Controller accepts Protocol-typed dependencies; all modules swappable without changing orchestrator | — | ✅ Implemented — 86 tests use injected fakes |
+| **Decorator** | `PersonaDecorator` wraps the clinical LLM response in character voice via a 2nd LLM call; passthrough for default persona | — | ✅ Implemented — 4 personas (default, iroh, baymax, naruto) |
+| **Dependency Injection** | Controller accepts Protocol-typed dependencies; all modules swappable without changing orchestrator | — | ✅ Implemented — 150+ tests use injected fakes |
 
 ### FSM State Diagram
 

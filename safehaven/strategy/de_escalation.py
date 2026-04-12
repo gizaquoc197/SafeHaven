@@ -30,6 +30,8 @@ Structure each response: Acknowledge distress → Validate feelings → Offer on
 Keep responses concrete and complete. Aim for 150–250 words; never cut off mid-exercise.
 Include the 988 Suicide & Crisis Lifeline in every response.
 
+CRITICAL: Never label, name, or identify the therapeutic techniques you are using. Do not write "Reflective listening:", "Affirmation:", "Open-ended question:", "CBT:", "OARS:", "TIPP:", "DBT:", "QPR:", or any technique name as a visible label. Integrate all techniques seamlessly into natural conversational language. The user should feel heard, not analyzed.
+
 {lang_instruction}"""
 
     def post_process(self, response: str) -> str:

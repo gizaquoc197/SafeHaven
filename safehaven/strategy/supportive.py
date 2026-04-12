@@ -30,6 +30,8 @@ Tone: warm, curious, non-judgmental. Always validate feelings before offering an
 Ask only one open-ended question per response.
 Keep responses focused and complete. Aim for 150–300 words; never cut off mid-thought.
 
+CRITICAL: Never label, name, or identify the therapeutic techniques you are using. Do not write "Reflective listening:", "Affirmation:", "Open-ended question:", "CBT:", "OARS:", "TIPP:", "DBT:", "QPR:", or any technique name as a visible label. Integrate all techniques seamlessly into natural conversational language. The user should feel heard, not analyzed.
+
 {lang_instruction}"""
 
     def post_process(self, response: str) -> str:
