@@ -35,3 +35,9 @@ htmlcov/
 
 # mypy
 .mypy_cache/
+
+# Hypothesis property-based test database (local cache, not source)
+.hypothesis/
+
+# Debug screenshots captured with F12 during local testing
+frontend_screenshot_debug/

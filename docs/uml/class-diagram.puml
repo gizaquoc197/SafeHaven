@@ -1,0 +1,439 @@
+@startuml SafeHaven Class Diagram
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam linetype ortho
+hide empty members
+
+' ─────────────────────────────────────────────────────────────────
+' MODELS
+' ─────────────────────────────────────────────────────────────────
+package "models" {
+    enum FSMState {
+        CALM
+        CONCERNED
+        ELEVATED
+        CRISIS
+    }
+
+    enum EmotionLabel {
+        NEUTRAL
+        HAPPY
+        SAD
+        ANXIOUS
+        ANGRY
+        FEARFUL
+    }
+
+    enum RiskLevel {
+        LOW = 1
+        MEDIUM = 2
+        HIGH = 3
+    }
+
+    class EmotionResult {
+        +label: EmotionLabel
+        +confidence: float
+    }
+
+    class Message {
+        +role: str
+        +content: str
+        +timestamp: datetime
+        +emotion: EmotionLabel | None
+        +risk_level: RiskLevel
+        +language: str
+    }
+
+    class UserState {
+        +current_emotion: EmotionResult
+        +risk_level: RiskLevel
+        +message_count: int
+        +escalation_history: list[RiskLevel]
+        +language: str
+        +fsm_state: str
+    }
+
+    class ConversationContext {
+        +recent_messages: list[Message]
+        +user_state: UserState
+        +system_prompt: str
+        +strategy_name: str
+        +temperature: float
+        +max_tokens: int
+        +to_llm_messages(): list[dict]
+    }
+
+    UserState *-- EmotionResult
+    ConversationContext *-- UserState
+    ConversationContext *-- Message
+    Message --> EmotionLabel
+    Message --> RiskLevel
+    EmotionResult --> EmotionLabel
+    UserState --> RiskLevel
+}
+
+' ─────────────────────────────────────────────────────────────────
+' INTERFACES (Protocols)
+' ─────────────────────────────────────────────────────────────────
+package "interfaces" <<Frame>> {
+    interface EmotionDetector <<Protocol>> {
+        +detect(text: str): EmotionResult
+    }
+
+    interface RiskEvaluator <<Protocol>> {
+        +evaluate(state: UserState): RiskLevel
+    }
+
+    interface ConversationMemory <<Protocol>> {
+        +store_message(message: Message): None
+        +get_recent_messages(limit: int): list[Message]
+        +clear(): None
+    }
+
+    interface ResponseGenerator <<Protocol>> {
+        +generate(context: ConversationContext): str
+    }
+
+    interface OutputFilter <<Protocol>> {
+        +validate(response: str, risk: RiskLevel): str
+    }
+
+    interface LanguageDetector <<Protocol>> {
+        +detect_language(text: str): str
+    }
+
+    interface ResponseStrategy <<Protocol>> {
+        +temperature: float
+        +max_tokens: int
+        +build_system_prompt(context: ConversationContext): str
+        +post_process(response: str): str
+    }
+
+    interface StrategySelector <<Protocol>> {
+        +select(risk: RiskLevel, fsm_state: str): ResponseStrategy
+    }
+}
+
+' ─────────────────────────────────────────────────────────────────
+' CONTROLLER  [Pipeline + DI patterns]
+' ─────────────────────────────────────────────────────────────────
+package "controller" {
+    class ChatController {
+        +detector: EmotionDetector
+        +evaluator: RiskEvaluator
+        +memory: ConversationMemory
+        +generator: ResponseGenerator
+        +output_filter: OutputFilter
+        +language_detector: LanguageDetector | None
+        +strategy_selector: StrategySelector | None
+        -_persona_decorator: PersonaDecorator | None
+        --
+        +active_persona: PersonaConfig
+        +fsm_state: str
+        +last_emotion: EmotionLabel | None
+        --
+        +handle_message(user_text: str): str | None
+        +clear(): None
+    }
+
+    note right of ChatController
+      <b>Pipeline</b> — handle_message() runs
+      12 discrete steps in sequence.
+      Step 8: HIGH risk → return None
+      (LLM never called in crisis).
+
+      <b>Dependency Injection</b> — all
+      dependencies injected via constructor
+      as Protocols; no concrete imports.
+    end note
+
+    ChatController o-- EmotionDetector
+    ChatController o-- RiskEvaluator
+    ChatController o-- ConversationMemory
+    ChatController o-- ResponseGenerator
+    ChatController o-- OutputFilter
+    ChatController o-right- LanguageDetector
+    ChatController o-right- StrategySelector
+    ChatController o-- PersonaDecorator
+}
+
+' ─────────────────────────────────────────────────────────────────
+' SAFETY
+' ─────────────────────────────────────────────────────────────────
+package "safety" {
+    class KeywordEmotionDetector {
+        -_crisis_keywords: list[str]
+        +detect(text: str): EmotionResult
+    }
+
+    class SimpleLanguageDetector {
+        +detect_language(text: str): str
+    }
+
+    class FSMRiskEvaluator {
+        -_state: str
+        -_consecutive_negative: int
+        -_RANK: dict[str, int]
+        --
+        +state: str
+        +evaluate(state: UserState): RiskLevel
+        -_transition_to(new_state: str): None
+        +clear(): None
+    }
+
+    note bottom of FSMRiskEvaluator
+      <b>FSM</b> — forward-only ratchet.
+      CALM → CONCERNED → ELEVATED → CRISIS
+      _RANK enforces monotonic constraint:
+      assert _RANK[new] >= _RANK[current]
+    end note
+
+    class KeywordRiskEvaluator {
+        +evaluate(state: UserState): RiskLevel
+    }
+
+    class SafeOutputFilter {
+        -_DANGEROUS_PATTERNS: list[Pattern]
+        -_EMPATHETIC_PREFIX: str
+        +validate(response: str, risk: RiskLevel): str
+    }
+
+    KeywordEmotionDetector .up.|> EmotionDetector
+    SimpleLanguageDetector .up.|> LanguageDetector
+    FSMRiskEvaluator .up.|> RiskEvaluator
+    KeywordRiskEvaluator .up.|> RiskEvaluator
+    SafeOutputFilter .up.|> OutputFilter
+}
+
+' ─────────────────────────────────────────────────────────────────
+' STRATEGY  [Strategy pattern]
+' ─────────────────────────────────────────────────────────────────
+package "strategy" {
+    class ConcreteStrategySelector {
+        +select(risk: RiskLevel, fsm_state: str): ResponseStrategy
+    }
+
+    note right of ConcreteStrategySelector
+      <b>Strategy</b> — selects clinical
+      framework by FSM state:
+      calm/concerned → Supportive (MI)
+      elevated → DeEscalation (DBT)
+      crisis → Crisis (QPR)
+    end note
+
+    class SupportiveStrategy {
+        +temperature: float = 0.75
+        +max_tokens: int = 250
+        +build_system_prompt(ctx): str
+        +post_process(response: str): str
+    }
+
+    class DeEscalationStrategy {
+        +temperature: float = 0.5
+        +max_tokens: int = 150
+        +build_system_prompt(ctx): str
+        +post_process(response: str): str
+    }
+
+    class CrisisStrategy {
+        +temperature: float = 0.2
+        +max_tokens: int = 100
+        +build_system_prompt(ctx): str
+        +post_process(response: str): str
+    }
+
+    ConcreteStrategySelector .up.|> StrategySelector
+    SupportiveStrategy .up.|> ResponseStrategy
+    DeEscalationStrategy .up.|> ResponseStrategy
+    CrisisStrategy .up.|> ResponseStrategy
+
+    ConcreteStrategySelector ..> SupportiveStrategy : creates
+    ConcreteStrategySelector ..> DeEscalationStrategy : creates
+    ConcreteStrategySelector ..> CrisisStrategy : creates
+}
+
+' ─────────────────────────────────────────────────────────────────
+' MEMORY  [Repository pattern]
+' ─────────────────────────────────────────────────────────────────
+package "memory" {
+    class InMemoryConversationMemory {
+        -_messages: list[Message]
+        +store_message(message: Message): None
+        +get_recent_messages(limit: int): list[Message]
+        +clear(): None
+    }
+
+    class SQLiteMemory {
+        -_conn: Connection
+        +store_message(message: Message): None
+        +get_recent_messages(limit: int): list[Message]
+        +clear(): None
+        -_run_schema(): None
+    }
+
+    note bottom of SQLiteMemory
+      <b>Repository</b> — two backends behind
+      one ConversationMemory protocol.
+      SQLiteMemory: production.
+      InMemoryConversationMemory: tests.
+    end note
+
+    InMemoryConversationMemory .up.|> ConversationMemory
+    SQLiteMemory .up.|> ConversationMemory
+}
+
+' ─────────────────────────────────────────────────────────────────
+' PERSONAS  [Decorator pattern]
+' ─────────────────────────────────────────────────────────────────
+package "personas" {
+    class PersonaConfig <<frozen dataclass>> {
+        +key: str
+        +name: str
+        +description: str
+        +system_prompt: str
+        +crisis_break_message: str
+        +particle_type: ParticleType
+        +welcome_message: str
+        +catchphrase: str
+        +typing_hint: str
+    }
+
+    enum ParticleType {
+        STEAM
+        SCAN
+        LEAVES
+        NONE
+    }
+
+    note bottom of PersonaConfig
+      <b>Decorator</b> — four personas registered
+      in PERSONAS dict: default (passthrough),
+      iroh, baymax, naruto.
+      Empty system_prompt → no 2nd LLM call.
+    end note
+
+    PersonaConfig --> ParticleType
+}
+
+package "persona_decorator" {
+    class PersonaDecorator {
+        -_persona: PersonaConfig
+        -_generator: ResponseGenerator
+        --
+        +wrap_response(raw_response: str,\n  emotion: str, risk_state: str): str
+        -_make_persona_context(raw_response: str): ConversationContext
+    }
+
+    note right of PersonaDecorator
+      <b>Decorator</b> — wraps clinical LLM
+      response in character voice via
+      a 2nd LLM call.
+      Passthrough: system_prompt == ""
+      Crisis guard: prepend break message
+      Fail-open: exception → return original
+    end note
+
+    PersonaDecorator o-- PersonaConfig
+    PersonaDecorator o-- ResponseGenerator
+}
+
+' ─────────────────────────────────────────────────────────────────
+' LLM
+' ─────────────────────────────────────────────────────────────────
+package "llm" {
+    class ClaudeResponseGenerator {
+        -_client: Anthropic
+        -_model: str
+        +generate(context: ConversationContext): str
+    }
+
+    class LocalModelGenerator {
+        -_model: str
+        +generate(context: ConversationContext): str
+    }
+
+    ClaudeResponseGenerator .up.|> ResponseGenerator
+    LocalModelGenerator .up.|> ResponseGenerator
+}
+
+' ─────────────────────────────────────────────────────────────────
+' UI  [Observer pattern]
+' ─────────────────────────────────────────────────────────────────
+package "ui" {
+    class SafeHavenApp {
+        +build(): ScreenManager
+        +set_controller(controller: ChatController): None
+    }
+
+    class ChatScreen {
+        -_controller: ChatController | None
+        -_state_bar: Widget
+        -_thinking_label: Label | None
+        --
+        +set_controller(controller: ChatController): None
+        +on_crisis_dismissed(): None
+        -_on_send(): None
+        -_process_in_background(text: str): None
+        -_update_fsm_bar(): None
+    }
+
+    class DashboardViewModel {
+        +message_count: NumericProperty
+        +emotion_counts: DictProperty
+        +current_risk: StringProperty
+        +risk_history: ListProperty
+        --
+        +refresh(memory: ConversationMemory): None
+    }
+
+    note right of DashboardViewModel
+      <b>Observer</b> — extends Kivy
+      EventDispatcher. Property changes
+      fire bound callbacks in InsightsScreen,
+      keeping UI in sync without polling.
+    end note
+
+    class InsightsScreen {
+        -_memory: ConversationMemory | None
+        -_vm: DashboardViewModel
+        --
+        +set_memory(memory: ConversationMemory): None
+        +set_controller(controller: ChatController): None
+        -_on_message_count(inst, value): None
+        -_on_emotion_counts(inst, counts): None
+        -_on_current_risk(inst, state): None
+        -_on_risk_history(inst, history): None
+    }
+
+    class CrisisScreen {
+        -_load_hotlines(): dict
+        -_dismiss(): None
+    }
+
+    class PersonaSelectionScreen {
+        +set_controller(controller: ChatController): None
+        -_on_persona_selected(persona: PersonaConfig): None
+    }
+
+    class CharacterAvatar {
+        +persona: PersonaConfig
+        +size: tuple
+    }
+
+    class WelcomeScreen
+    class _MessageBubble
+
+    SafeHavenApp *-- ChatScreen
+    SafeHavenApp *-- InsightsScreen
+    SafeHavenApp *-- CrisisScreen
+    SafeHavenApp *-- WelcomeScreen
+    SafeHavenApp *-- PersonaSelectionScreen
+    ChatScreen o-- ChatController
+    InsightsScreen *-- DashboardViewModel
+    InsightsScreen o-- ConversationMemory
+    ChatScreen *-- _MessageBubble
+    PersonaSelectionScreen *-- CharacterAvatar
+    PersonaSelectionScreen o-- ChatController
+}
+
+@enduml
