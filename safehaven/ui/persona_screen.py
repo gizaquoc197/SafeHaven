@@ -33,7 +33,7 @@ class _PersonaCard(BoxLayout):
     """Single tappable persona card showing emoji, name, and description."""
 
     def __init__(self, key: str, on_select: object, **kwargs: object) -> None:
-        super().__init__(orientation="vertical", padding=12, spacing=6, **kwargs)
+        super().__init__(orientation="vertical", padding=(12, 20), spacing=6, **kwargs)
         self._key = key
         self._on_select = on_select
         persona = PERSONAS[key]
@@ -129,6 +129,9 @@ class PersonaScreen(Screen):
         self.bind(size=self._update_bg, pos=self._update_bg)
 
         root = BoxLayout(orientation="vertical", padding=24, spacing=16)
+
+        # Top elastic spacer — balances the bottom spacer to vertically centre the cards
+        root.add_widget(Widget(size_hint_y=1))
 
         # Title
         root.add_widget(Label(

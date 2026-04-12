@@ -506,28 +506,29 @@ class ChatScreen(Screen):
             bg_color=bg_color,
             font_size=self._bubble_font_size,
             radius=self._bubble_radius,
-            size_hint_x=0.85,
+            size_hint_x=0.70 if is_user else 0.75,
+            size_hint_min_x=200,
             accent_color=None if is_user else self._bot_accent_color,
         )
 
         row = BoxLayout(size_hint_y=None, height=40, orientation="horizontal")
         bubble.bind(height=row.setter("height"))
         if is_user:
-            row.add_widget(Widget(size_hint_x=0.15))
+            row.add_widget(Widget(size_hint_x=0.30))
             row.add_widget(bubble)
         else:
-            # 32 px avatar, top-aligned via a vertical wrapper
-            av = CharacterAvatar(size_hint=(None, None), size=(32, 32))
+            # 40 px avatar, top-aligned via a vertical wrapper
+            av = CharacterAvatar(size_hint=(None, None), size=(40, 40))
             av.set_persona(self._active_persona_key)
             av_wrap = BoxLayout(
-                orientation="vertical", size_hint=(None, 1), width=36
+                orientation="vertical", size_hint=(None, 1), width=44
             )
             av_wrap.add_widget(av)        # first child → top of the wrapper
             av_wrap.add_widget(Widget())  # spacer fills the rest below
 
             row.add_widget(av_wrap)
             row.add_widget(bubble)
-            row.add_widget(Widget(size_hint_x=0.15))
+            row.add_widget(Widget(size_hint_x=0.25))
 
         self._message_list.add_widget(row)
         Clock.schedule_once(lambda _dt: self._scroll_to_bottom(), 0.05)
