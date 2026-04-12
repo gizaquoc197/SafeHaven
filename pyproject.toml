@@ -15,6 +15,8 @@ dev = [
     "pytest>=7.0",
     "mypy>=1.0",
     "pyinstaller>=6.0",
+    "hypothesis>=6.0",
+    "pytest-cov>=4.0",
 ]
 local = [
     "ollama>=0.4",
@@ -34,3 +36,10 @@ allow_subclassing_any = true
 
 [tool.pytest.ini_options]
 testpaths = ["safehaven/tests"]
+
+[tool.coverage.run]
+source = ["safehaven"]
+omit = ["safehaven/tests/*", "safehaven/ui/*"]
+
+[tool.coverage.report]
+show_missing = true

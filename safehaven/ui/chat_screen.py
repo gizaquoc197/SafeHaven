@@ -7,6 +7,7 @@ send button, and emotion-colored message bubbles.
 from __future__ import annotations
 
 import threading
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from kivy.animation import Animation
@@ -141,6 +142,17 @@ class ChatScreen(Screen):
         self._send_btn.bind(on_release=self._on_send)
         input_row.add_widget(self._send_btn)
 
+        insights_btn = Button(
+            text="Insights",
+            size_hint_x=None,
+            width=80,
+            font_size="13sp",
+            background_color=_hex_to_rgba("#7E57C2"),
+            color=[1, 1, 1, 1],
+        )
+        insights_btn.bind(on_release=self._go_to_insights)
+        input_row.add_widget(insights_btn)
+
         inner.add_widget(input_row)
         root.add_widget(inner)
         self.add_widget(root)
@@ -216,8 +228,10 @@ class ChatScreen(Screen):
     # ── Display helpers ────────────────────────────────────────
 
     def _append_message(self, sender: str, text: str, bg_color: str) -> None:
+        ts = datetime.now().strftime("%H:%M")
         bubble = _MessageBubble(
-            text=f"[b]{sender}:[/b] {text}", bg_color=bg_color
+            text=f"[b]{sender}[/b]  [size=11][color=888888]{ts}[/color][/size]\n{text}",
+            bg_color=bg_color,
         )
         # Set text_size after widget is added so it wraps properly
         bubble.bind(
@@ -283,3 +297,7 @@ class ChatScreen(Screen):
         if self._thinking_label is not None:
             self._message_list.remove_widget(self._thinking_label)
             self._thinking_label = None
+
+    def _go_to_insights(self, *_args: object) -> None:
+        if self.manager is not None:
+            self.manager.current = "insights"

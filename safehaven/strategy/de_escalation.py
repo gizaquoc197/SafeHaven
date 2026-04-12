@@ -11,6 +11,9 @@ from safehaven.models import ConversationContext
 class DeEscalationStrategy:
     """Careful, grounding prompting for elevated-risk conversations."""
 
+    temperature: float = 0.5
+    max_tokens: int = 150
+
     def build_system_prompt(self, context: ConversationContext) -> str:
         """Return a de-escalation system prompt grounded in DBT Distress Tolerance."""
         lang = context.user_state.language

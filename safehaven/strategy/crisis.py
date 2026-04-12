@@ -11,6 +11,9 @@ from safehaven.models import ConversationContext
 class CrisisStrategy:
     """Minimal LLM interaction — directs to crisis resources."""
 
+    temperature: float = 0.2
+    max_tokens: int = 100
+
     def build_system_prompt(self, context: ConversationContext) -> str:
         """Return a crisis system prompt grounded in QPR (Question, Persuade, Refer)."""
         lang = context.user_state.language

@@ -122,6 +122,8 @@ class ChatController:
         # 7. Select strategy and build system prompt
         system_prompt = ""
         strategy_name = ""
+        strategy_temperature: float = 0.7
+        strategy_max_tokens: int = 1024
         if self.strategy_selector is not None:
             try:
                 strategy = self.strategy_selector.select(risk, self.fsm_state)
@@ -131,6 +133,8 @@ class ChatController:
                     user_state=state,
                 )
                 system_prompt = strategy.build_system_prompt(context_for_prompt)
+                strategy_temperature = strategy.temperature
+                strategy_max_tokens = strategy.max_tokens
             except Exception:
                 return "Sorry, I couldn't prepare a safe response strategy. Please try again."
 
@@ -140,6 +144,8 @@ class ChatController:
             user_state=state,
             system_prompt=system_prompt,
             strategy_name=strategy_name,
+            temperature=strategy_temperature,
+            max_tokens=strategy_max_tokens,
         )
         try:
             raw_response = self.generator.generate(context)

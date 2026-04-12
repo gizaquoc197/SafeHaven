@@ -73,6 +73,9 @@ class LanguageDetector(Protocol):
 
 
 class ResponseStrategy(Protocol):
+    temperature: float
+    max_tokens: int
+
     def build_system_prompt(self, context: ConversationContext) -> str:
         """Return a system prompt tailored to current risk/emotion state."""
         ...

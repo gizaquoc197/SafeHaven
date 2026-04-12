@@ -11,6 +11,9 @@ from safehaven.models import ConversationContext
 class SupportiveStrategy:
     """Warm, empathetic prompting for low-risk conversations."""
 
+    temperature: float = 0.75
+    max_tokens: int = 250
+
     def build_system_prompt(self, context: ConversationContext) -> str:
         """Return a supportive system prompt grounded in Motivational Interviewing (OARS)."""
         lang = context.user_state.language

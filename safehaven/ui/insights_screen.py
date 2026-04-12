@@ -31,6 +31,7 @@ from safehaven.ui.theme import (
 )
 
 if TYPE_CHECKING:
+    from safehaven.controller.chat_controller import ChatController
     from safehaven.interfaces import ConversationMemory
 
 
@@ -51,6 +52,13 @@ class DashboardViewModel(EventDispatcher):
     current_risk = StringProperty("calm")
     risk_history = ListProperty([])
 
+    # Maps RiskLevel enum names → FSM color keys used by RISK_COLORS
+    _RISK_TO_COLOR: dict[str, str] = {
+        "low": "calm",
+        "medium": "concerned",
+        "high": "crisis",
+    }
+
     def refresh(self, memory: ConversationMemory) -> None:
         """Pull latest data from the Repository and update all properties."""
         messages = memory.get_recent_messages(limit=100)
@@ -63,12 +71,11 @@ class DashboardViewModel(EventDispatcher):
                 key = m.emotion.value
                 counts[key] = counts.get(key, 0) + 1
             if m.role == "user":
-                history.append(m.risk_level.name.lower())
+                color_key = self._RISK_TO_COLOR.get(m.risk_level.name.lower(), "calm")
+                history.append(color_key)
 
         self.emotion_counts = counts
         self.risk_history = history
-        if history:
-            self.current_risk = history[-1]
 
 
 class _StatCard(BoxLayout):
@@ -104,9 +111,10 @@ class _StatCard(BoxLayout):
         self._value_lbl.text = value
 
     def set_color(self, color: str) -> None:
+        self.canvas.before.clear()
         with self.canvas.before:
             Color(*_hex_to_rgba(color))
-            RoundedRectangle(size=self.size, pos=self.pos, radius=[8])
+            self._rect = RoundedRectangle(size=self.size, pos=self.pos, radius=[8])
 
     def _upd(self, *_: object) -> None:
         self._rect.size = self.size
@@ -123,6 +131,7 @@ class InsightsScreen(Screen):
     def __init__(self, **kwargs: object) -> None:
         super().__init__(**kwargs)
         self._memory: ConversationMemory | None = None
+        self._controller: ChatController | None = None
         self._vm = DashboardViewModel()
         self._log_lines: list[str] = []
 
@@ -173,6 +182,7 @@ class InsightsScreen(Screen):
             halign="left",
         ))
         self._emotion_bars: dict[str, Widget] = {}
+        self._count_lbls: dict[str, Label] = {}
         self._emotion_bar_container = BoxLayout(
             orientation="vertical",
             size_hint_y=None,
@@ -199,15 +209,16 @@ class InsightsScreen(Screen):
             bar.bind(pos=lambda inst, v: setattr(getattr(inst, "_rect"), "pos", v))
             bar_bg.add_widget(bar)
             self._emotion_bars[emotion.value] = bar
-            self._count_lbl = Label(
+            count_lbl = Label(
                 text="0",
                 font_size="11sp",
                 color=[0.6, 0.6, 0.6, 1],
                 size_hint_x=None,
                 width=24,
             )
+            self._count_lbls[emotion.value] = count_lbl
             row.add_widget(bar_bg)
-            row.add_widget(self._count_lbl)
+            row.add_widget(count_lbl)
             self._emotion_bar_container.add_widget(row)
         root.add_widget(self._emotion_bar_container)
 
@@ -281,11 +292,20 @@ class InsightsScreen(Screen):
         self._add_log("[Repository] Memory injected — initial refresh")
         self._vm.refresh(memory)
 
+    def set_controller(self, controller: ChatController) -> None:
+        """Inject the controller so the risk card shows the live FSM state."""
+        self._controller = controller
+
     def on_pre_enter(self, *_: object) -> None:
         """Refresh dashboard every time the screen is navigated to."""
         if self._memory is not None:
             self._vm.refresh(self._memory)
             self._add_log("[Observer] Screen entered — refreshed from repository")
+        if self._controller is not None:
+            live_state = self._controller.fsm_state
+            self._card_risk.set_value(live_state)
+            self._card_risk.set_color(RISK_COLORS.get(live_state, RISK_COLORS["calm"]))
+            self._add_log(f"[Observer] live FSM state: {live_state}")
 
     # ── ViewModel → UI bindings ─────────────────────────────────
 
@@ -299,6 +319,9 @@ class InsightsScreen(Screen):
             if bar is not None:
                 ratio = counts.get(emotion.value, 0) / total
                 Animation(size_hint_x=ratio, duration=0.3).start(bar)
+            lbl = self._count_lbls.get(emotion.value)
+            if lbl is not None:
+                lbl.text = str(counts.get(emotion.value, 0))
         self._add_log(f"[Observer] emotion_counts updated: {counts}")
 
     def _on_current_risk(self, _inst: object, state: str) -> None:
@@ -322,7 +345,10 @@ class InsightsScreen(Screen):
             color = RISK_COLORS.get(state, RISK_COLORS["calm"])
             with dot.canvas:
                 Color(*_hex_to_rgba(color))
-                RoundedRectangle(size=(16, 16), pos=(dot.x + 1, dot.y + 6), radius=[4])
+                rr = RoundedRectangle(size=(16, 16), pos=dot.pos, radius=[4])
+            dot.bind(
+                pos=lambda inst, v, r=rr: setattr(r, "pos", (v[0] + 1, v[1] + 1)),
+            )
             self._timeline_row.add_widget(dot)
 
     # ── Simulate ────────────────────────────────────────────────

@@ -59,6 +59,8 @@ class ConversationContext:
     user_state: UserState
     system_prompt: str = ""
     strategy_name: str = ""
+    temperature: float = 0.7
+    max_tokens: int = 1024
 
     def to_llm_messages(self) -> list[dict[str, str]]:
         """Format as user/assistant message dicts for the Claude API.
