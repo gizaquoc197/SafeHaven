@@ -164,6 +164,9 @@ class ChatScreen(Screen):
         self._particle_widget: AmbientParticleWidget | None = None
         self._conversation_started: bool = False
         self._welcome_persona_key: str = ""
+        self._new_chat_btn: Button | None = None
+        self._insights_btn: Button | None = None
+        self._header_rect_ref: Rectangle | None = None
 
         with self.canvas.before:
             self._bg_color_inst = Color(0.98, 0.98, 0.98, 1.0)
@@ -177,7 +180,7 @@ class ChatScreen(Screen):
         root = BoxLayout(orientation="vertical", padding=0, spacing=0)
 
         # FSM risk-level indicator bar (height=6, colored by current FSM state)
-        self._state_bar = Widget(size_hint_y=None, height=6)
+        self._state_bar = Widget(size_hint_y=None, height=12)
         with self._state_bar.canvas:
             self._state_bar_color_inst = Color(*_hex_to_rgba(RISK_COLORS["calm"]))
             self._state_bar_rect = Rectangle(
@@ -197,7 +200,7 @@ class ChatScreen(Screen):
             spacing=8,
         )
         with header.canvas.before:
-            Color(*_hex_to_rgba("#FFFFFF"))
+            self._header_bg_color_inst = Color(*_hex_to_rgba("#FFFFFF"))
             self._header_rect = Rectangle(size=header.size, pos=header.pos)
         header.bind(
             size=lambda inst, v: setattr(self._header_rect, "size", v),
@@ -217,12 +220,12 @@ class ChatScreen(Screen):
             size_hint=(None, None),
             size=(80, 28),
             font_size="12sp",
-            background_color=_hex_to_rgba("#FFFFFF"),
-            color=_hex_to_rgba(PRIMARY_COLOR),
-            border=(1, 1, 1, 1),
+            background_color=_hex_to_rgba(PRIMARY_COLOR),
+            color=[1, 1, 1, 1],
         )
         new_chat_btn.bind(on_release=self._on_new_chat)
         header.add_widget(new_chat_btn)
+        self._new_chat_btn = new_chat_btn
         root.add_widget(header)
 
         inner = BoxLayout(orientation="vertical", padding=10, spacing=8)
@@ -278,6 +281,7 @@ class ChatScreen(Screen):
         )
         insights_btn.bind(on_release=self._go_to_insights)
         input_row.add_widget(insights_btn)
+        self._insights_btn = insights_btn
 
         inner.add_widget(input_row)
         root.add_widget(inner)
@@ -308,6 +312,17 @@ class ChatScreen(Screen):
 
         # Send button
         self._send_btn.background_color = _hex_to_rgba(primary)
+
+        # Header background matches persona background
+        self._header_bg_color_inst.rgba = _hex_to_rgba(bg)
+
+        # New Chat button uses persona secondary; Insights uses persona accent
+        if self._new_chat_btn is not None:
+            self._new_chat_btn.background_color = _hex_to_rgba(
+                persona.colors["secondary"]
+            )
+        if self._insights_btn is not None:
+            self._insights_btn.background_color = _hex_to_rgba(primary)
 
         # Bubble colors and style for future messages
         self._user_bubble_color = persona.colors["bubble_user"]
@@ -377,6 +392,8 @@ class ChatScreen(Screen):
             welcome = "Welcome to SafeHaven. How are you feeling today?"
             self._welcome_persona_key = ""
         self._append_system(welcome)
+        # After clearing, scroll to top so welcome message is visible at top
+        Clock.schedule_once(lambda _dt: setattr(self._scroll, "scroll_y", 1), 0.05)
 
     # ── Interaction ────────────────────────────────────────────
 
@@ -550,7 +567,7 @@ class ChatScreen(Screen):
         color = _hex_to_rgba(RISK_COLORS.get(fsm_state, RISK_COLORS["calm"]))
         self._state_bar_color_inst.rgba = color
         self._state_bar_rect.size = self._state_bar.size
-        anim = Animation(height=2, duration=0.15) + Animation(height=6, duration=0.15)
+        anim = Animation(height=4, duration=0.15) + Animation(height=12, duration=0.15)
         anim.start(self._state_bar)
 
     # ── Navigation ─────────────────────────────────────────────
