@@ -76,3 +76,10 @@ class PersonaConfig:
 
     Prepended verbatim before the raw clinical response; not LLM-processed.
     """
+
+    welcome_message: str = ""
+    """Opening message displayed when the persona is first activated.
+
+    Shown in place of the default SafeHaven greeting. Empty string means
+    use the default "Welcome to SafeHaven. How are you feeling today?" text.
+    """

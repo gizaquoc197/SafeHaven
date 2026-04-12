@@ -113,7 +113,14 @@ class _TypingDots(BoxLayout):
 class _MessageBubble(Label):
     """A single chat message with a colored background."""
 
-    def __init__(self, text: str, bg_color: str, **kwargs: object) -> None:
+    def __init__(
+        self,
+        text: str,
+        bg_color: str,
+        font_size: str = "14sp",
+        radius: int = 8,
+        **kwargs: object,
+    ) -> None:
         super().__init__(
             text=text,
             markup=True,
@@ -121,14 +128,14 @@ class _MessageBubble(Label):
             text_size=(None, None),
             padding=(12, 8),
             color=_hex_to_rgba(TEXT_COLOR),
-            font_size="14sp",
+            font_size=font_size,
             **kwargs,
         )
         self._bg_color = _hex_to_rgba(bg_color)
         with self.canvas.before:
             Color(*self._bg_color)
             self._bg_rect = RoundedRectangle(
-                size=self.size, pos=self.pos, radius=[8]
+                size=self.size, pos=self.pos, radius=[radius]
             )
         self.bind(size=self._update, pos=self._update, texture_size=self._update)
 
@@ -152,7 +159,11 @@ class ChatScreen(Screen):
         self._thinking_widget: BoxLayout | None = None
         self._user_bubble_color: str = _USER_BUBBLE_COLOR
         self._default_bot_bubble_color: str = _DEFAULT_BOT_BUBBLE_COLOR
+        self._bubble_font_size: str = "14sp"
+        self._bubble_radius: int = 8
         self._particle_widget: AmbientParticleWidget | None = None
+        self._conversation_started: bool = False
+        self._welcome_persona_key: str = ""
 
         with self.canvas.before:
             self._bg_color_inst = Color(0.98, 0.98, 0.98, 1.0)
@@ -298,9 +309,11 @@ class ChatScreen(Screen):
         # Send button
         self._send_btn.background_color = _hex_to_rgba(primary)
 
-        # Bubble colors for future messages
+        # Bubble colors and style for future messages
         self._user_bubble_color = persona.colors["bubble_user"]
         self._default_bot_bubble_color = persona.colors["bubble_bot"]
+        self._bubble_font_size = persona.bubble_style["font_size"]
+        self._bubble_radius = persona.bubble_style["radius"]
 
         # Particle widget lifecycle
         ptype = persona.particle_type
@@ -328,8 +341,17 @@ class ChatScreen(Screen):
 
     def on_pre_enter(self, *_args: object) -> None:
         """Apply the active persona theme each time this screen is shown."""
-        if self._controller is not None:
-            self.apply_persona_theme(self._controller.active_persona)
+        if self._controller is None:
+            return
+        persona = self._controller.active_persona
+        self.apply_persona_theme(persona)
+        # Replace welcome message when a new persona is selected and no real
+        # conversation has started yet.
+        if not self._conversation_started and persona.key != self._welcome_persona_key:
+            self._message_list.clear_widgets()
+            welcome = persona.welcome_message or "Welcome to SafeHaven. How are you feeling today?"
+            self._append_system(welcome)
+            self._welcome_persona_key = persona.key
 
     def on_leave(self, *_args: object) -> None:
         """Pause particle animation while the screen is not visible."""
@@ -341,14 +363,20 @@ class ChatScreen(Screen):
         if self._controller is not None:
             self._controller.clear()
         self._message_list.clear_widgets()
+        self._conversation_started = False
         # Reset mood background to persona base color
         Animation.cancel_all(self)
         if self._controller is not None:
-            bg = self._controller.active_persona.colors["background"]
+            persona = self._controller.active_persona
+            bg = persona.colors["background"]
             self._bg_color_prop = _hex_to_rgba(bg)
+            welcome = persona.welcome_message or "Welcome to SafeHaven. How are you feeling today?"
+            self._welcome_persona_key = persona.key
         else:
             self._bg_color_prop = [0.98, 0.98, 0.98, 1.0]
-        self._append_system("Welcome to SafeHaven. How are you feeling today?")
+            welcome = "Welcome to SafeHaven. How are you feeling today?"
+            self._welcome_persona_key = ""
+        self._append_system(welcome)
 
     # ── Interaction ────────────────────────────────────────────
 
@@ -357,6 +385,7 @@ class ChatScreen(Screen):
         if not text or self._controller is None:
             return
 
+        self._conversation_started = True
         self._text_input.text = ""
         self._append_message("You", text, self._user_bubble_color, is_user=True)
         self._set_input_enabled(False)
@@ -384,7 +413,11 @@ class ChatScreen(Screen):
         self._hide_thinking()
 
         bubble_color = self._default_bot_bubble_color
-        if self._controller is not None and self._controller.last_emotion is not None:
+        if (
+            self._controller is not None
+            and self._controller.last_emotion is not None
+            and self._controller.active_persona.key == "default"
+        ):
             bubble_color = EMOTION_COLORS.get(
                 self._controller.last_emotion, self._default_bot_bubble_color
             )
@@ -425,6 +458,8 @@ class ChatScreen(Screen):
         bubble = _MessageBubble(
             text=f"[b]{sender}[/b]  [size=11][color=888888]{ts}[/color][/size]\n{display}",
             bg_color=bg_color,
+            font_size=self._bubble_font_size,
+            radius=self._bubble_radius,
             size_hint_x=0.85,
         )
 
@@ -457,7 +492,7 @@ class ChatScreen(Screen):
         row = BoxLayout(size_hint_y=None, height=30, orientation="horizontal")
         row.add_widget(dots)
         row.add_widget(Widget())
-        row._dots_ref = dots  # type: ignore[attr-defined]
+        row._dots_ref = dots
         self._thinking_widget = row
         self._message_list.add_widget(row)
         Clock.schedule_once(lambda _dt: self._scroll_to_bottom(), 0.05)
@@ -487,8 +522,14 @@ class ChatScreen(Screen):
         self._bg_color_inst.rgba = value
 
     def _update_mood_background(self) -> None:
-        """Animate the background toward a lightened tint of the detected emotion."""
+        """Animate the background toward a lightened tint of the detected emotion.
+
+        Only applies to the default persona — named personas keep their fixed
+        background color so their palette isn't washed out by emotion tints.
+        """
         if self._controller is None or self._controller.last_emotion is None:
+            return
+        if self._controller.active_persona.key != "default":
             return
         target_hex = EMOTION_COLORS.get(self._controller.last_emotion, BACKGROUND_COLOR)
         Animation(
