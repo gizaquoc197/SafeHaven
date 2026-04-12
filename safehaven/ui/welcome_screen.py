@@ -103,4 +103,4 @@ class WelcomeScreen(Screen):
 
     def _go_to_chat(self, *_args: object) -> None:
         if self.manager is not None:
-            self.manager.current = "chat"
+            self.manager.current = "persona"

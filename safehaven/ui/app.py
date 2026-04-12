@@ -15,6 +15,7 @@ from kivy.uix.screenmanager import ScreenManager
 from safehaven.ui.chat_screen import ChatScreen
 from safehaven.ui.crisis_screen import CrisisScreen
 from safehaven.ui.insights_screen import InsightsScreen
+from safehaven.ui.persona_screen import PersonaScreen
 from safehaven.ui.welcome_screen import WelcomeScreen
 
 if TYPE_CHECKING:
@@ -34,6 +35,7 @@ class SafeHavenApp(App):
         Window.bind(on_key_down=self._on_key_down)
         sm = ScreenManager()
         sm.add_widget(WelcomeScreen(name="welcome"))
+        sm.add_widget(PersonaScreen(name="persona"))
         sm.add_widget(ChatScreen(name="chat"))
         sm.add_widget(CrisisScreen(name="crisis"))
         sm.add_widget(InsightsScreen(name="insights"))
@@ -60,8 +62,12 @@ class SafeHavenApp(App):
             print(f"Screenshot saved: {path}")
 
     def _apply_controller(self, controller: ChatController) -> None:
-        """Wire controller into ChatScreen and memory into InsightsScreen."""
+        """Wire controller into PersonaScreen, ChatScreen, and InsightsScreen."""
         sm = self._screen_manager
+
+        persona_screen = sm.get_screen("persona")
+        assert isinstance(persona_screen, PersonaScreen)
+        persona_screen.set_controller(controller)
 
         chat_screen = sm.get_screen("chat")
         assert isinstance(chat_screen, ChatScreen)

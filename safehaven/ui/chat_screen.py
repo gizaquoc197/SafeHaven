@@ -23,6 +23,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
+from safehaven.personas.config import PersonaConfig
 from safehaven.ui.theme import (
     BACKGROUND_COLOR,
     EMOTION_COLORS,
@@ -35,7 +36,8 @@ from safehaven.ui.theme import (
 if TYPE_CHECKING:
     from safehaven.controller.chat_controller import ChatController
 
-_USER_BUBBLE_COLOR = "#E8EAF6"  # Material indigo-50
+_USER_BUBBLE_COLOR = "#E8EAF6"  # Material indigo-50 — default persona fallback
+_DEFAULT_BOT_BUBBLE_COLOR = "#E3F2FD"  # Material blue-50 — default persona fallback
 
 
 def _hex_to_rgba(hex_color: str) -> list[float]:
@@ -147,6 +149,8 @@ class ChatScreen(Screen):
         super().__init__(**kwargs)
         self._controller: ChatController | None = None
         self._thinking_widget: BoxLayout | None = None
+        self._user_bubble_color: str = _USER_BUBBLE_COLOR
+        self._default_bot_bubble_color: str = _DEFAULT_BOT_BUBBLE_COLOR
 
         with self.canvas.before:
             self._bg_color_inst = Color(0.98, 0.98, 0.98, 1.0)
@@ -186,14 +190,15 @@ class ChatScreen(Screen):
             size=lambda inst, v: setattr(self._header_rect, "size", v),
             pos=lambda inst, v: setattr(self._header_rect, "pos", v),
         )
-        header.add_widget(Label(
+        self._header_label = Label(
             text="SafeHaven",
             font_size="16sp",
             bold=True,
             color=_hex_to_rgba(PRIMARY_COLOR),
             halign="left",
             size_hint_x=1,
-        ))
+        )
+        header.add_widget(self._header_label)
         new_chat_btn = Button(
             text="New Chat",
             size_hint=(None, None),
@@ -272,14 +277,46 @@ class ChatScreen(Screen):
         """Inject the ChatController (Observer pattern)."""
         self._controller = controller
 
+    def apply_persona_theme(self, persona: PersonaConfig) -> None:
+        """Apply persona color palette and name to all themed UI surfaces.
+
+        Called from ``on_pre_enter`` each time the chat screen becomes active so
+        that switching personas between sessions is reflected immediately.
+        """
+        primary = persona.colors["primary"]
+        bg = persona.colors["background"]
+
+        # Screen background
+        self._bg_color_prop = _hex_to_rgba(bg)
+
+        # Header title: persona name + primary color
+        self._header_label.text = persona.name
+        self._header_label.color = _hex_to_rgba(primary)
+
+        # Send button
+        self._send_btn.background_color = _hex_to_rgba(primary)
+
+        # Bubble colors for future messages
+        self._user_bubble_color = persona.colors["bubble_user"]
+        self._default_bot_bubble_color = persona.colors["bubble_bot"]
+
+    def on_pre_enter(self, *_args: object) -> None:
+        """Apply the active persona theme each time this screen is shown."""
+        if self._controller is not None:
+            self.apply_persona_theme(self._controller.active_persona)
+
     def _on_new_chat(self, *_args: object) -> None:
         """Clear conversation history and reset FSM to CALM."""
         if self._controller is not None:
             self._controller.clear()
         self._message_list.clear_widgets()
-        # Reset mood background
+        # Reset mood background to persona base color
         Animation.cancel_all(self)
-        self._bg_color_prop = [0.98, 0.98, 0.98, 1.0]
+        if self._controller is not None:
+            bg = self._controller.active_persona.colors["background"]
+            self._bg_color_prop = _hex_to_rgba(bg)
+        else:
+            self._bg_color_prop = [0.98, 0.98, 0.98, 1.0]
         self._append_system("Welcome to SafeHaven. How are you feeling today?")
 
     # ── Interaction ────────────────────────────────────────────
@@ -290,7 +327,7 @@ class ChatScreen(Screen):
             return
 
         self._text_input.text = ""
-        self._append_message("You", text, _USER_BUBBLE_COLOR, is_user=True)
+        self._append_message("You", text, self._user_bubble_color, is_user=True)
         self._set_input_enabled(False)
         self._show_thinking()
 
@@ -315,13 +352,18 @@ class ChatScreen(Screen):
     def _on_response(self, text: str) -> None:
         self._hide_thinking()
 
-        bubble_color = "#E3F2FD"
+        bubble_color = self._default_bot_bubble_color
         if self._controller is not None and self._controller.last_emotion is not None:
             bubble_color = EMOTION_COLORS.get(
-                self._controller.last_emotion, "#E3F2FD"
+                self._controller.last_emotion, self._default_bot_bubble_color
             )
 
-        self._append_message("SafeHaven", text, bubble_color, is_user=False)
+        sender = (
+            self._controller.active_persona.name
+            if self._controller is not None
+            else "SafeHaven"
+        )
+        self._append_message(sender, text, bubble_color, is_user=False)
         self._update_fsm_bar()
         self._update_mood_background()
         self._set_input_enabled(True)
