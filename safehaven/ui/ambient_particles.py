@@ -184,7 +184,7 @@ class AmbientParticleWidget(Widget):
                 "vy": random.uniform(20.0, 35.0),
                 "wobble_amp": random.uniform(8.0, 15.0),
                 "wobble_freq": random.uniform(2.5, 4.2),
-                "max_opacity": random.uniform(0.35, 0.55),
+                "max_opacity": random.uniform(0.45, 0.65),
             }
         )
 
@@ -248,7 +248,7 @@ class AmbientParticleWidget(Widget):
         size = float(p["size"]) * (1.0 - frac * 0.7)
         size = max(size, 0.5)
         color, ellipse = self._pool[p["pool_idx"]]
-        color.rgba = [1.0, 0.97, 0.90, max(opacity, 0.0)]
+        color.rgba = [0.72, 0.52, 0.22, max(opacity, 0.0)]
         ellipse.pos = (float(p["x"]) - size / 2.0, float(p["y"]) - size / 2.0)
         ellipse.size = (size, size)
 
