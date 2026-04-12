@@ -367,6 +367,7 @@ class ChatScreen(Screen):
             welcome = persona.welcome_message or "Welcome to SafeHaven. How are you feeling today?"
             self._append_system(welcome)
             self._welcome_persona_key = persona.key
+            Clock.schedule_once(lambda _dt: setattr(self._scroll, "scroll_y", 1), 0.1)
 
     def on_leave(self, *_args: object) -> None:
         """Pause particle animation while the screen is not visible."""
@@ -374,26 +375,16 @@ class ChatScreen(Screen):
             self._particle_widget.stop()
 
     def _on_new_chat(self, *_args: object) -> None:
-        """Clear conversation history and reset FSM to CALM."""
+        """Clear conversation and navigate to persona selection for a fresh session."""
         if self._controller is not None:
             self._controller.clear()
         self._message_list.clear_widgets()
         self._conversation_started = False
-        # Reset mood background to persona base color
+        self._welcome_persona_key = ""
         Animation.cancel_all(self)
-        if self._controller is not None:
-            persona = self._controller.active_persona
-            bg = persona.colors["background"]
-            self._bg_color_prop = _hex_to_rgba(bg)
-            welcome = persona.welcome_message or "Welcome to SafeHaven. How are you feeling today?"
-            self._welcome_persona_key = persona.key
-        else:
-            self._bg_color_prop = [0.98, 0.98, 0.98, 1.0]
-            welcome = "Welcome to SafeHaven. How are you feeling today?"
-            self._welcome_persona_key = ""
-        self._append_system(welcome)
-        # After clearing, scroll to top so welcome message is visible at top
-        Clock.schedule_once(lambda _dt: setattr(self._scroll, "scroll_y", 1), 0.05)
+        self._bg_color_prop = [0.98, 0.98, 0.98, 1.0]
+        if self.manager is not None:
+            self.manager.current = "persona"
 
     # ── Interaction ────────────────────────────────────────────
 

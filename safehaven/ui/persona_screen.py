@@ -155,8 +155,9 @@ class PersonaScreen(Screen):
         self._bg_rect.pos = self.pos
 
     def _on_persona_selected(self, key: str) -> None:
-        """Set active persona on the controller and navigate to chat."""
+        """Reset session, set active persona, and navigate to chat."""
         if self._controller is not None:
+            self._controller.clear()
             self._controller.active_persona = PERSONAS[key]
         if self.manager is not None:
             self.manager.current = "chat"

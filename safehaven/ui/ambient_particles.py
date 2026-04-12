@@ -32,7 +32,7 @@ _MAX_PARTICLES = 40
 _MAX_SCAN_RINGS = 3
 
 _SPAWN_INTERVAL: dict[ParticleType, float] = {
-    ParticleType.STEAM: 0.3,
+    ParticleType.STEAM: 0.2,
     ParticleType.SCAN: 3.0,
     ParticleType.LEAVES: 0.5,
     ParticleType.NONE: 0.0,
@@ -169,8 +169,9 @@ class AmbientParticleWidget(Widget):
             self._spawn_leaf(idx)
 
     def _spawn_steam(self, idx: int) -> None:
-        x = self.x + random.uniform(10.0, 80.0)
-        y = self.y + random.uniform(0.0, 40.0)
+        # Spread across full width, rise from bottom 15% of screen
+        x = self.x + random.uniform(0.05 * self.width, 0.95 * self.width)
+        y = self.y + random.uniform(0.0, 0.15 * self.height)
         self._active.append(
             {
                 "pool_idx": idx,
@@ -179,11 +180,11 @@ class AmbientParticleWidget(Widget):
                 "base_x": x,
                 "age": 0.0,
                 "max_age": random.uniform(3.0, 5.0),
-                "size": random.uniform(4.0, 8.0),
+                "size": random.uniform(8.0, 16.0),
                 "vy": random.uniform(20.0, 35.0),
                 "wobble_amp": random.uniform(8.0, 15.0),
                 "wobble_freq": random.uniform(2.5, 4.2),
-                "max_opacity": random.uniform(0.15, 0.3),
+                "max_opacity": random.uniform(0.35, 0.55),
             }
         )
 
