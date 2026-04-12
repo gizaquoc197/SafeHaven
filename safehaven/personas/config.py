@@ -83,3 +83,9 @@ class PersonaConfig:
     Shown in place of the default SafeHaven greeting. Empty string means
     use the default "Welcome to SafeHaven. How are you feeling today?" text.
     """
+
+    catchphrase: str = ""
+    """Short italic tagline shown on the persona selection card."""
+
+    typing_hint: str = ""
+    """Text shown beside the typing dots while the LLM generates a response."""

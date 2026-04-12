@@ -14,8 +14,10 @@ from kivy.uix.button import Button
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
+from kivy.uix.widget import Widget
 
 from safehaven.personas import PERSONAS
+from safehaven.ui.persona_icons import CharacterAvatar
 
 if TYPE_CHECKING:
     from safehaven.controller.chat_controller import ChatController
@@ -37,47 +39,60 @@ class _PersonaCard(BoxLayout):
         persona = PERSONAS[key]
         primary = persona.colors["primary"]
 
-        # Colored border via canvas
+        # Canvas: white background, top colour strip, coloured border
         with self.canvas.before:
             Color(*_hex_to_rgba("#FFFFFF"))
             self._bg = Rectangle(size=self.size, pos=self.pos)
             Color(*_hex_to_rgba(primary))
-            self._border = Line(rectangle=(self.x, self.y, self.width, self.height), width=2)
+            self._top_strip = Rectangle(
+                pos=(self.x, self.top - 8), size=(self.width, 8)
+            )
+            Color(*_hex_to_rgba(primary))
+            self._border = Line(
+                rectangle=(self.x, self.y, self.width, self.height), width=2
+            )
         self.bind(size=self._update_canvas, pos=self._update_canvas)
 
-        # Emoji avatar
-        self.add_widget(Label(
-            text=persona.icon_emoji,
-            font_size="36sp",
+        # 80 px canvas-drawn avatar, horizontally centred
+        avatar_row = BoxLayout(
+            orientation="horizontal",
             size_hint_y=None,
-            height=52,
-            halign="center",
-        ))
+            height=88,
+        )
+        avatar = CharacterAvatar(size_hint=(None, None), size=(80, 80))
+        avatar.set_persona(key)
+        avatar_row.add_widget(Widget())
+        avatar_row.add_widget(avatar)
+        avatar_row.add_widget(Widget())
+        self.add_widget(avatar_row)
 
-        # Name
+        # Character name — bold, 18sp, persona primary colour
         self.add_widget(Label(
             text=persona.name,
-            font_size="14sp",
+            font_size="18sp",
             bold=True,
-            color=_hex_to_rgba(persona.colors["text"]),
+            color=_hex_to_rgba(persona.colors["primary"]),
             size_hint_y=None,
-            height=22,
+            height=26,
             halign="center",
         ))
 
-        # Description — wraps inside the card
-        desc_label = Label(
-            text=persona.description,
-            font_size="11sp",
-            color=_hex_to_rgba(persona.colors["text"]),
+        # Catchphrase — italic, 13sp, gray, wraps inside the card
+        catch_label = Label(
+            text=f"[i]{persona.catchphrase}[/i]",
+            markup=True,
+            font_size="13sp",
+            color=_hex_to_rgba("#757575"),
             halign="center",
             valign="top",
-            text_size=(self.width - 24, None),
+            size_hint_y=1,
         )
-        self.bind(width=lambda _, w: setattr(desc_label, "text_size", (w - 24, None)))
-        self.add_widget(desc_label)
+        catch_label.bind(
+            width=lambda inst, w: setattr(inst, "text_size", (w - 24, None))
+        )
+        self.add_widget(catch_label)
 
-        # Invisible tap button overlaid via a transparent Button at the bottom
+        # Select button
         tap_btn = Button(
             text="Select",
             font_size="12sp",
@@ -92,6 +107,8 @@ class _PersonaCard(BoxLayout):
     def _update_canvas(self, *_args: object) -> None:
         self._bg.size = self.size
         self._bg.pos = self.pos
+        self._top_strip.pos  = (self.x, self.top - 8)
+        self._top_strip.size = (self.width, 8)
         self._border.rectangle = (self.x, self.y, self.width, self.height)
 
     def _select(self, *_args: object) -> None:
@@ -135,7 +152,7 @@ class PersonaScreen(Screen):
         ))
 
         # Card grid — one card per persona
-        grid = GridLayout(cols=len(PERSONAS), spacing=12, size_hint_y=None, height=220)
+        grid = GridLayout(cols=len(PERSONAS), spacing=12, size_hint_y=None, height=280)
         for key in ("default", "iroh", "baymax", "naruto"):
             if key in PERSONAS:
                 grid.add_widget(_PersonaCard(key=key, on_select=self._on_persona_selected))

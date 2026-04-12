@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from kivy.animation import Animation
 from kivy.clock import Clock
-from kivy.graphics import Color, Rectangle, RoundedRectangle
+from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
 from kivy.properties import ColorProperty
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
@@ -25,6 +25,7 @@ from kivy.uix.widget import Widget
 
 from safehaven.personas.config import ParticleType, PersonaConfig
 from safehaven.ui.ambient_particles import AmbientParticleWidget
+from safehaven.ui.persona_icons import CharacterAvatar
 from safehaven.ui.theme import (
     BACKGROUND_COLOR,
     EMOTION_COLORS,
@@ -119,6 +120,7 @@ class _MessageBubble(Label):
         bg_color: str,
         font_size: str = "14sp",
         radius: int = 8,
+        accent_color: str | None = None,
         **kwargs: object,
     ) -> None:
         super().__init__(
@@ -126,17 +128,23 @@ class _MessageBubble(Label):
             markup=True,
             size_hint=(1, None),
             text_size=(None, None),
-            padding=(12, 8),
+            padding=(16, 8),    # extra left padding leaves room for the accent strip
             color=_hex_to_rgba(TEXT_COLOR),
             font_size=font_size,
             **kwargs,
         )
         self._bg_color = _hex_to_rgba(bg_color)
+        self._accent_rect: Rectangle | None = None
         with self.canvas.before:
             Color(*self._bg_color)
             self._bg_rect = RoundedRectangle(
                 size=self.size, pos=self.pos, radius=[radius]
             )
+            if accent_color is not None:
+                Color(*_hex_to_rgba(accent_color))
+                self._accent_rect = Rectangle(
+                    pos=self.pos, size=(4, self.height)
+                )
         self.bind(size=self._update, pos=self._update, texture_size=self._update)
 
     def _update(self, *_args: object) -> None:
@@ -146,6 +154,9 @@ class _MessageBubble(Label):
             self.height = max(self.texture_size[1] + 20, 40)
         self._bg_rect.size = self.size
         self._bg_rect.pos = self.pos
+        if self._accent_rect is not None:
+            self._accent_rect.pos = self.pos
+            self._accent_rect.size = (4, self.height)
 
 
 class ChatScreen(Screen):
@@ -167,6 +178,9 @@ class ChatScreen(Screen):
         self._new_chat_btn: Button | None = None
         self._insights_btn: Button | None = None
         self._header_rect_ref: Rectangle | None = None
+        self._active_persona_key: str = "default"
+        self._bot_accent_color: str = "#FFC107"   # default persona accent
+        self._header_avatar: CharacterAvatar | None = None
 
         with self.canvas.before:
             self._bg_color_inst = Color(0.98, 0.98, 0.98, 1.0)
@@ -206,6 +220,12 @@ class ChatScreen(Screen):
             size=lambda inst, v: setattr(self._header_rect, "size", v),
             pos=lambda inst, v: setattr(self._header_rect, "pos", v),
         )
+        self._header_avatar = CharacterAvatar(
+            size_hint=(None, None), size=(32, 32)
+        )
+        self._header_avatar.set_persona("default")
+        header.add_widget(self._header_avatar)
+
         self._header_label = Label(
             text="SafeHaven",
             font_size="16sp",
@@ -354,6 +374,24 @@ class ChatScreen(Screen):
             self._particle_widget = pw
             self._particle_widget.start()
 
+        # Track persona key + accent colour used when rendering bot messages
+        self._active_persona_key = persona.key
+        self._bot_accent_color = persona.colors["accent"]
+
+        # Header avatar — switches icon to match the active persona
+        if self._header_avatar is not None:
+            self._header_avatar.set_persona(persona.key)
+
+        # Themed input bar: persona-specific hint text and cursor colour
+        _HINT_TEXT: dict[str, str] = {
+            "default": "Type a message\u2026",
+            "iroh":    "Share your thoughts over tea\u2026",
+            "baymax":  "Describe what you are experiencing\u2026",
+            "naruto":  "Tell me what's going on!",
+        }
+        self._text_input.hint_text = _HINT_TEXT.get(persona.key, "Type a message\u2026")
+        self._text_input.cursor_color = _hex_to_rgba(primary)
+
     def on_pre_enter(self, *_args: object) -> None:
         """Apply the active persona theme each time this screen is shown."""
         if self._controller is None:
@@ -469,6 +507,7 @@ class ChatScreen(Screen):
             font_size=self._bubble_font_size,
             radius=self._bubble_radius,
             size_hint_x=0.85,
+            accent_color=None if is_user else self._bot_accent_color,
         )
 
         row = BoxLayout(size_hint_y=None, height=40, orientation="horizontal")
@@ -477,6 +516,16 @@ class ChatScreen(Screen):
             row.add_widget(Widget(size_hint_x=0.15))
             row.add_widget(bubble)
         else:
+            # 32 px avatar, top-aligned via a vertical wrapper
+            av = CharacterAvatar(size_hint=(None, None), size=(32, 32))
+            av.set_persona(self._active_persona_key)
+            av_wrap = BoxLayout(
+                orientation="vertical", size_hint=(None, 1), width=36
+            )
+            av_wrap.add_widget(av)        # first child → top of the wrapper
+            av_wrap.add_widget(Widget())  # spacer fills the rest below
+
+            row.add_widget(av_wrap)
             row.add_widget(bubble)
             row.add_widget(Widget(size_hint_x=0.15))
 
@@ -497,9 +546,33 @@ class ChatScreen(Screen):
 
     def _show_thinking(self) -> None:
         dots = _TypingDots()
-        row = BoxLayout(size_hint_y=None, height=30, orientation="horizontal")
+
+        hint = "SafeHaven is thinking\u2026"
+        hint_color = _hex_to_rgba(PRIMARY_COLOR)
+        if self._controller is not None:
+            persona = self._controller.active_persona
+            if persona.typing_hint:
+                hint = persona.typing_hint
+            hint_color = _hex_to_rgba(persona.colors["primary"])
+
+        hint_lbl = Label(
+            text=f"[i]{hint}[/i]",
+            markup=True,
+            font_size="12sp",
+            color=hint_color,
+            size_hint_x=1,
+            size_hint_y=None,
+            height=30,
+            halign="left",
+            valign="middle",
+        )
+        hint_lbl.bind(width=lambda inst, w: setattr(inst, "text_size", (w, None)))
+
+        row = BoxLayout(
+            size_hint_y=None, height=30, orientation="horizontal", spacing=4
+        )
         row.add_widget(dots)
-        row.add_widget(Widget())
+        row.add_widget(hint_lbl)
         row._dots_ref = dots
         self._thinking_widget = row
         self._message_list.add_widget(row)

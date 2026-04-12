@@ -33,4 +33,6 @@ DEFAULT_PERSONA = PersonaConfig(
     system_prompt="",
     # Unused for the default persona — included for interface completeness.
     crisis_break_message="",
+    catchphrase="Evidence-based mental health support",
+    typing_hint="SafeHaven is thinking\u2026",
 )

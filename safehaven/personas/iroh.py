@@ -58,4 +58,8 @@ IROH_PERSONA = PersonaConfig(
         "Ah, welcome, my friend. Please, sit — I have just brewed a fresh "
         "pot. There is no rush here. Tell me, how are you feeling today?"
     ),
+    catchphrase=(
+        "Sometimes the best way to solve your own problems is to help someone else"
+    ),
+    typing_hint="Iroh is brewing a thought\u2026",
 )
